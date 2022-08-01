@@ -447,6 +447,7 @@ namespace interplanetary
                 );
             }
 
+            if (!py_p["min_start_time"].is_none()) flight_plan.add_min_start_time_constraint(py_p["min_start_time"].cast<double>());
             if (!py_p["min_time"].is_none()) flight_plan.add_min_flight_time_constraint(py_p["min_time"].cast<double>());
             if (!py_p["max_time"].is_none()) flight_plan.add_max_flight_time_constraint(py_p["max_time"].cast<double>());
             if (!py_p["max_c3"].is_none()) flight_plan.add_max_c3_constraint(py_p["max_c3"].cast<double>());
@@ -507,6 +508,7 @@ namespace interplanetary
         catch (const std::exception& e)
         {
             std::cerr << e.what() << '\n';
+            return py::dict();
         }
     }
 

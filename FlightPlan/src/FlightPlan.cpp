@@ -20,6 +20,7 @@ FlightPlan::FlightPlan(Ephemeris& ephemeris)
 
     // initialize constraints with default values
     data_.start_time = -1.0;
+    data_.min_start_time = -1.0;
     data_.min_time = -1.0;
     data_.max_time = data_.ephemeris->get_max_time();
     data_.max_c3 = -1.0;
@@ -72,6 +73,11 @@ void FlightPlan::add_body(std::string body, Jdate jd, double radius_min, double 
 void FlightPlan::add_start_time_constraint(Jdate start_time)
 {
     data_.start_time = data_.ephemeris->get_ephemeris_time(start_time);
+}
+
+void FlightPlan::add_min_start_time_constraint(Jdate min_start_time)
+{
+    data_.min_start_time = data_.ephemeris->get_ephemeris_time(min_start_time);
 }
 
 void FlightPlan::add_min_flight_time_constraint(double min_time)
@@ -159,6 +165,11 @@ void FlightPlan::init_conic_model(double eps)
         double dt = t_[i + 1] - t_[i];
 
         // positions are placed at the center of the body at the specified time
+        if (t_[i] < 0 || t_[i] > data_.ephemeris->get_max_time() || t_[i + 1] < 0 || t_[i + 1] > data_.ephemeris->get_max_time())
+        {
+            throw std::runtime_error("ephemeris time out of bounds.");
+        }
+
         auto [ri, vbi] = data_.ephemeris->get_position_velocity(bodies_[i], t_[i]);
         auto [rf, vbf] = data_.ephemeris->get_position_velocity(bodies_[i + 1], t_[i + 1]);
 
@@ -453,7 +464,11 @@ std::tuple<std::vector<double>, std::vector<double>> FlightPlan::bounds_conic_mo
     }
 
     // start time must be greater than zero and within a year of initial guess
-    if (t_.front() > year_)
+    if (data_.min_start_time > 0)
+    {
+        lower_bounds.push_back(data_.min_start_time);
+    }
+    else if (t_.front() > year_)
     {
         lower_bounds.push_back(t_.front() - year_);
     }
@@ -1627,7 +1642,11 @@ std::tuple<std::vector<double>, std::vector<double>> FlightPlan::bounds_nbody_mo
     upper_bounds.push_back(2.0 * pi);
 
     // start time bounds
-    if (xn_[index_t0] > year_)
+    if (data_.min_start_time > 0)
+    {
+        lower_bounds.push_back(data_.min_start_time);
+    }
+    else if (xn_[index_t0] > year_)
     {
         lower_bounds.push_back(xn_[index_t0] - year_);
     }

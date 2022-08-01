@@ -14,6 +14,7 @@ public:
 
     void add_body(std::string body, Jdate jd, double radius_min, double d_scale, double orbits=0.0);
     void add_start_time_constraint(Jdate start_time);
+    void add_min_start_time_constraint(Jdate min_start_time);
     void add_min_flight_time_constraint(double min_time);
     void add_max_flight_time_constraint(double max_time);
     void add_max_c3_constraint(double c3);
@@ -86,6 +87,7 @@ private:
         double min_moon_distance_squared;
         double eps;
         double start_time;
+        double min_start_time;
         double min_time;
         double max_time;
         double max_c3;
