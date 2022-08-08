@@ -107,6 +107,12 @@ namespace astrodynamics
     std::tuple<Eigen::Vector3d, Eigen::Vector3d, Eigen::Matrix<double, 6, 1>, Eigen::Matrix<double, 6, 6>> kepler_stm(
         Eigen::Vector3d r0, Eigen::Vector3d v0, double t, double mu, double eps);
 
+    // returns state after specified amount of time by solving universal Kepler's equation
+    // breaks trajectory into n time steps where sqrt_mu_t is less than tau squared
+    // additionally solves for the state transition matrix
+    std::tuple<Eigen::Vector3d, Eigen::Vector3d, Eigen::Matrix<double, 6, 1>, Eigen::Matrix<double, 6, 6>> kepler_stm_s(
+        Eigen::Vector3d r0, Eigen::Vector3d v0, double t, double mu, double eps);
+
     // returns the initial and final velocity connecting two positions within a 
     // specified time interval in space by solving Lambert's problem
     std::tuple<Eigen::Vector3d, Eigen::Vector3d> lambert(

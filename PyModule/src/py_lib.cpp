@@ -451,10 +451,22 @@ namespace interplanetary
             if (!py_p["min_time"].is_none()) flight_plan.add_min_flight_time_constraint(py_p["min_time"].cast<double>());
             if (!py_p["max_time"].is_none()) flight_plan.add_max_flight_time_constraint(py_p["max_time"].cast<double>());
             if (!py_p["max_c3"].is_none()) flight_plan.add_max_c3_constraint(py_p["max_c3"].cast<double>());
-            if (!py_p["min_inclination_launch"].is_none() && !py_p["max_inclination_launch"].is_none()) flight_plan.add_inclination_constraint(
-                true, py_p["min_inclination_launch"].cast<double>(), py_p["max_inclination_launch"].cast<double>());
-            if (!py_p["min_inclination_arrival"].is_none() && !py_p["max_inclination_arrival"].is_none()) flight_plan.add_inclination_constraint(
-                false, py_p["min_inclination_arrival"].cast<double>(), py_p["max_inclination_arrival"].cast<double>());
+            if (!py_p["min_inclination_launch"].is_none() && !py_p["max_inclination_launch"].is_none() && !py_p["n_launch"].is_none())
+            {
+                py::array_t<double> py_n_launch = py_p["n_launch"];
+                Eigen::Vector3d n_launch = { py_n_launch.at(0), py_n_launch.at(1), py_n_launch.at(2) };
+                flight_plan.add_inclination_constraint(
+                    true, py_p["min_inclination_launch"].cast<double>(), py_p["max_inclination_launch"].cast<double>(), n_launch);
+            }
+
+            if (!py_p["min_inclination_arrival"].is_none() && !py_p["max_inclination_arrival"].is_none() && !py_p["n_arrival"].is_none())
+            {
+                py::array_t<double> py_n_arrival = py_p["n_arrival"];
+                Eigen::Vector3d n_arrival = { py_n_arrival.at(0), py_n_arrival.at(1), py_n_arrival.at(2) };
+                flight_plan.add_inclination_constraint(
+                    false, py_p["min_inclination_arrival"].cast<double>(), py_p["max_inclination_arrival"].cast<double>(), n_arrival);
+            }
+
             if (!py_p["eccentricity_arrival"].is_none()) flight_plan.add_arrival_eccentricity_constraint(py_p["eccentricity_arrival"].cast<double>());
 
             flight_plan.init_conic_model(py_p["eps_conic"].cast<double>());
@@ -704,7 +716,6 @@ namespace interplanetary
             std::cout << "num evals: " << opt.get_numevals() << '\n';
 
             std::vector<double> result(6);
-
 
             constraints_tcm(m, result.data(), n, x0.data(), NULL, &tcm_data);
 

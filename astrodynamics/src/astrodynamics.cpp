@@ -385,6 +385,35 @@ namespace astrodynamics
 		return { r0, v0 };
 	}
 
+	// returns state after specified amount of time by solving universal Kepler's equation,
+	// breaks trajectory into n time steps where sqrt_mu_t is less than tau squared
+	// additionally solves for the state transition matrix
+	// r0 = initial position
+	// v0 = initial velocity
+	// t = delta time
+	// mu = gravitational parameter of body
+	// eps = convergence tolerance
+	std::tuple<Eigen::Vector3d, Eigen::Vector3d, Eigen::Matrix<double, 6, 1>, Eigen::Matrix<double, 6, 6>> kepler_stm_s(
+		Eigen::Vector3d r0, Eigen::Vector3d v0, double t, double mu, double eps)
+	{
+		double alpha = 2.0 / r0.norm() - v0.squaredNorm() / mu;
+		int n = sqrt(abs(pow(alpha, 3) * pow(t, 2) * mu)) / tau + 1;
+		t /= n;
+
+		Eigen::Matrix<double, 6, 1> xp;
+		Eigen::Matrix<double, 6, 6> stm;
+		Eigen::Matrix<double, 6, 6> stmf;
+		stmf.setIdentity();
+
+		for (int i = 0; i < n; i++)
+		{
+			std::tie(r0, v0, xp, stm) = kepler_stm(r0, v0, t, mu, eps);
+			stmf = stm * stmf;
+		}
+
+		return { r0, v0, xp, stmf };
+	}
+
 	// returns state after specified amount of time by solving universal Kepler's equation
 	// additionally solves for the state transition matrix
 	// r0 = initial position

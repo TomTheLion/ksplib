@@ -27,8 +27,10 @@ FlightPlan::FlightPlan(Ephemeris& ephemeris)
     data_.eccentricity_arrival = -1.0;
     data_.min_inclination_launch = 0.0;
     data_.max_inclination_launch = astrodynamics::pi;
+    data_.n_launch = -Eigen::Vector3d::UnitY();
     data_.min_inclination_arrival = 0.0;
     data_.max_inclination_arrival = astrodynamics::pi;
+    data_.n_arrival = -Eigen::Vector3d::UnitY();
 
     // set solar system specific parameters
     home_body_ = "Earth";
@@ -100,17 +102,19 @@ void FlightPlan::add_arrival_eccentricity_constraint(double eccentricity)
     data_.eccentricity_arrival = eccentricity;
 }
 
-void FlightPlan::add_inclination_constraint(bool launch, double min, double max)
+void FlightPlan::add_inclination_constraint(bool launch, double min, double max, Eigen::Vector3d n)
 {
     if (launch)
     {
         data_.min_inclination_launch = astrodynamics::pi / 180.0 * min;
         data_.max_inclination_launch = astrodynamics::pi / 180.0 * max;
+        data_.n_launch = n;
     }
     else
     {
         data_.min_inclination_arrival = astrodynamics::pi / 180.0 * min;
         data_.max_inclination_arrival = astrodynamics::pi / 180.0 * max;
+        data_.n_arrival = n;
     }    
 }
 
@@ -175,11 +179,11 @@ void FlightPlan::init_conic_model(double eps)
 
         if (orbits_[i] > 0)
         {     
-            double dt1 = dt * (orbits_[i] - 0.5) / orbits_[i];
+            double dt1 = orbits_[i] < 1.0 ? 0.5 * dt : dt * (orbits_[i] - 0.5) / orbits_[i];
             double dt2 = dt - dt1;
-            ta.push_back(t_[i] + dt1 - 0.1 * dt2);
+            ta.push_back(t_[i] + dt1 - 0.5 * dt2);
             ta.push_back(t_[i] + dt1);
-            ta.push_back(t_[i] + dt1 + 0.1 * dt2);
+            ta.push_back(t_[i] + dt1 + 0.5 * dt2);
             ta.push_back(t_[i + 1]);
 
             double a = pow(pow(dt / orbits_[i] / (2.0 * astrodynamics::pi), 2.0) * data_.ephemeris->get_muk(), 1.0 / 3.0);
@@ -194,9 +198,9 @@ void FlightPlan::init_conic_model(double eps)
         }
         else
         {
-            ta.push_back(t_[i] + 0.45 * dt);
+            ta.push_back(t_[i] + 0.25 * dt);
             ta.push_back(t_[i] + 0.50 * dt);
-            ta.push_back(t_[i] + 0.55 * dt);
+            ta.push_back(t_[i] + 0.75 * dt);
             ta.push_back(t_[i + 1]);
 
             auto [vi, vf] = astrodynamics::lambert(ri, rf, dt, data_.ephemeris->get_muk(), 1, home_body_normal_, eps);
@@ -256,6 +260,12 @@ void FlightPlan::run_conic_model(int max_eval, double eps, double eps_t, double 
 
     std::vector<double> tol(m, eps_t);
     auto [lower_bounds, upper_bounds] = bounds_conic_model();
+
+    for (int i = 0; i < xa_.size(); i++)
+    {
+        if (xa_[i] < lower_bounds[i]) xa_[i] = lower_bounds[i];
+        if (xa_[i] > upper_bounds[i]) xa_[i] = upper_bounds[i];
+    }
 
     double minf;
     opt_a_ = nlopt::opt("LD_SLSQP", n);
@@ -399,23 +409,23 @@ FlightPlan::Result FlightPlan::output_conic_result(double eps)
                 result.body.push_back(data_.sequence[phase + 1]);
             }
 
-            result.r[0].push_back(r1(0));
-            result.r[1].push_back(r1(1));
-            result.r[2].push_back(r1(2));
-            result.v[0].push_back(v1(0));
-            result.v[1].push_back(v1(1));
-            result.v[2].push_back(v1(2));
+            result.r[0].push_back(r1(0) * result.distance_scale);
+            result.r[1].push_back(r1(1) * result.distance_scale);
+            result.r[2].push_back(r1(2) * result.distance_scale);
+            result.v[0].push_back(v1(0) * result.velocity_scale);
+            result.v[1].push_back(v1(1) * result.velocity_scale);
+            result.v[2].push_back(v1(2) * result.velocity_scale);
 
             for (int j = 0; j < data_.num_bodies; j++)
             {
                 int b = data_.sequence[j];
                 auto [rb, vb] = data_.ephemeris->get_position_velocity(b, t);
-                result.rb[j][0].push_back(rb(0));
-                result.rb[j][1].push_back(rb(1));
-                result.rb[j][2].push_back(rb(2));
-                result.vb[j][0].push_back(vb(0));
-                result.vb[j][1].push_back(vb(1));
-                result.vb[j][2].push_back(vb(2));
+                result.rb[j][0].push_back(rb(0) * result.distance_scale);
+                result.rb[j][1].push_back(rb(1) * result.distance_scale);
+                result.rb[j][2].push_back(rb(2) * result.distance_scale);
+                result.vb[j][0].push_back(vb(0) * result.velocity_scale);
+                result.vb[j][1].push_back(vb(1) * result.velocity_scale);
+                result.vb[j][2].push_back(vb(2) * result.velocity_scale);
             }
         }
     };
@@ -426,7 +436,7 @@ FlightPlan::Result FlightPlan::output_conic_result(double eps)
         output_kepler(i, 0, rb[i], v0[2 * i], t[4 * i], t[4 * i + 1]);
         output_kepler(i, 1, r1[4 * i], v1[4 * i], t[4 * i + 1], t[4 * i + 2]);
         output_kepler(i, 2, r1[4 * i + 2], v1[4 * i + 2], t[4 * i + 2], t[4 * i + 3]);
-        output_kepler(i, 3, r1[4 * i + 3], v1[4 * i + 3], t[4 * i + 3], t[4 * i + 4]);
+        output_kepler(i, 3, r1[4 * i + 3], v1[4 * i + 3] + dv[3 * i + 2], t[4 * i + 3], t[4 * i + 4]);
     }
 
     return result;
@@ -599,14 +609,14 @@ void FlightPlan::constraints_conic_model(unsigned m, double *result, unsigned n,
         {
             for (int i = 0; i < data->num_phases; i++)
             {
-                std::tie(r1[4 * i], v1[4 * i], a1[4 * i], stm[4 * i]) = astrodynamics::kepler_stm(rb[i], v0[2 * i], x[index_dt + 4 * i], data->ephemeris->get_muk(), data->eps);
+                std::tie(r1[4 * i], v1[4 * i], a1[4 * i], stm[4 * i]) = astrodynamics::kepler_stm_s(rb[i], v0[2 * i], x[index_dt + 4 * i], data->ephemeris->get_muk(), data->eps);
                 v1[4 * i] += dv[3 * i];
-                std::tie(r1[4 * i + 1], v1[4 * i + 1], a1[4 * i + 1], stm[4 * i + 1]) = astrodynamics::kepler_stm(r1[4 * i], v1[4 * i], x[index_dt + 4 * i + 1], data->ephemeris->get_muk(), data->eps);
+                std::tie(r1[4 * i + 1], v1[4 * i + 1], a1[4 * i + 1], stm[4 * i + 1]) = astrodynamics::kepler_stm_s(r1[4 * i], v1[4 * i], x[index_dt + 4 * i + 1], data->ephemeris->get_muk(), data->eps);
                 v1[4 * i + 1] += dv[3 * i + 1];
 
-                std::tie(r1[4 * i + 3], v1[4 * i + 3], a1[4 * i + 3], stm[4 * i + 3]) = astrodynamics::kepler_stm(rb[i + 1], v0[2 * i + 1], -x[index_dt + 4 * i + 3], data->ephemeris->get_muk(), data->eps);
+                std::tie(r1[4 * i + 3], v1[4 * i + 3], a1[4 * i + 3], stm[4 * i + 3]) = astrodynamics::kepler_stm_s(rb[i + 1], v0[2 * i + 1], -x[index_dt + 4 * i + 3], data->ephemeris->get_muk(), data->eps);
                 v1[4 * i + 3] -= dv[3 * i + 2];
-                std::tie(r1[4 * i + 2], v1[4 * i + 2], a1[4 * i + 2], stm[4 * i + 2]) = astrodynamics::kepler_stm(r1[4 * i + 3], v1[4 * i + 3], -x[index_dt + 4 * i + 2], data->ephemeris->get_muk(), data->eps);
+                std::tie(r1[4 * i + 2], v1[4 * i + 2], a1[4 * i + 2], stm[4 * i + 2]) = astrodynamics::kepler_stm_s(r1[4 * i + 3], v1[4 * i + 3], -x[index_dt + 4 * i + 2], data->ephemeris->get_muk(), data->eps);
             }
         }
         else
@@ -1172,6 +1182,12 @@ void FlightPlan::run_nbody_model(int max_eval, double eps, double eps_t, double 
     std::vector<double> tol(m, eps_t);
 
     auto [lower_bounds, upper_bounds] = bounds_nbody_model();
+
+    for (int i = 0; i < xn_.size(); i++)
+    {
+        if (xn_[i] < lower_bounds[i]) xn_[i] = lower_bounds[i];
+        if (xn_[i] > upper_bounds[i]) xn_[i] = upper_bounds[i];
+    }
 
     double minf;
     opt_n_ = nlopt::opt("LD_SLSQP", n);
@@ -1944,8 +1960,18 @@ void FlightPlan::constraints_nbody_model(unsigned m, double *result, unsigned n,
         // -5   -4    -3   -2    -1
 
         // inclination constraints
-        double cosi_launch = cos(x[1]) * cos(x[4]) * sin(x[3] - x[0]);
-        double cosi_arrival = cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
+        auto calc_h = [](double ra, double dec, double vra, double vdec)
+        {
+            Eigen::Vector3d r = { cos(ra) * cos(dec), sin(dec), sin(ra) * cos(dec) };
+            Eigen::Vector3d v = { cos(vra) * cos(vdec), sin(vdec), sin(vra) * cos(vdec)} ;
+            return r.cross(v);
+        };
+
+        double cosi_launch = data->n_launch.dot(calc_h(x[0], x[1], x[3], x[4]));
+        double cosi_arrival = data->n_arrival.dot(calc_h(x[index_t0 - 5], x[index_t0 - 4], x[index_t0 - 2], x[index_t0 - 1]));
+
+        // double cosi_launch = cos(x[1]) * cos(x[4]) * sin(x[3] - x[0]);
+        // double cosi_arrival = cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
 
         *result_ptr++ = cosi_launch - cos(data->min_inclination_launch) + x[index_sl];
         index_sl++;
@@ -2385,35 +2411,79 @@ void FlightPlan::constraints_nbody_model(unsigned m, double *result, unsigned n,
             
             // ra, dec, vrho, vra, vdec
             //  0    1     2    3     4
-            // -5   -4    -3   -2    -1
+            // -5   -4    -3   -2    -1 
+
+            auto calc_dh = [](Eigen::Vector3d n, double ra, double dec, double vra, double vdec)
+            {
+                Eigen::Vector3d r = { cos(ra) * cos(dec), sin(dec), sin(ra) * cos(dec) };
+                Eigen::Vector3d drdra = { -sin(ra) * cos(dec), 0.0, cos(ra) * cos(dec) };
+                Eigen::Vector3d drddec = { cos(ra) * -sin(dec), cos(dec), sin(ra) * -sin(dec) };
+
+                Eigen::Vector3d v = { cos(vra) * cos(vdec), sin(vdec), sin(vra) * cos(vdec) };
+                Eigen::Vector3d dvdvra = { -sin(vra) * cos(vdec), 0.0, cos(vra) * cos(vdec) };
+                Eigen::Vector3d dvdvdec = { cos(vra) * -sin(vdec), cos(vdec), sin(vra) * -sin(vdec) };
+
+                return std::tuple{ n.dot(drdra.cross(v)), n.dot(drddec.cross(v)), n.dot(r.cross(dvdvra)), n.dot(r.cross(dvdvdec))};
+            };
+
+            auto [dra_launch, ddec_launch, dvra_launch, dvdec_launch] = calc_dh(data->n_launch, x[0], x[1], x[3], x[4]);
+            auto [dra_arrival, ddec_arrival, dvra_arrival, dvdec_arrival] = calc_dh(data->n_arrival, x[index_t0 - 5], x[index_t0 - 4], x[index_t0 - 2], x[index_t0 - 1]);
 
             // launch
 
-            mgrad(row_index_inc + 0, 0) = -cos(x[1]) * cos(x[4]) * cos(x[3] - x[0]);
-            mgrad(row_index_inc + 1, 0) = -cos(x[1]) * cos(x[4]) * cos(x[3] - x[0]);
+            mgrad(row_index_inc + 0, 0) = dra_launch;
+            mgrad(row_index_inc + 1, 0) = dra_launch;
 
-            mgrad(row_index_inc + 0, 1) = -sin(x[1]) * cos(x[4]) * sin(x[3] - x[0]);
-            mgrad(row_index_inc + 1, 1) = -sin(x[1]) * cos(x[4]) * sin(x[3] - x[0]);
+            mgrad(row_index_inc + 0, 1) = ddec_launch;
+            mgrad(row_index_inc + 1, 1) = ddec_launch;
 
-            mgrad(row_index_inc + 0, 3) = cos(x[1]) * cos(x[4]) * cos(x[0] - x[3]);
-            mgrad(row_index_inc + 1, 3) = cos(x[1]) * cos(x[4]) * cos(x[0] - x[3]);
+            mgrad(row_index_inc + 0, 3) = dvra_launch;
+            mgrad(row_index_inc + 1, 3) = dvra_launch;
 
-            mgrad(row_index_inc + 0, 4) = -cos(x[1]) * sin(x[4]) * sin(x[3] - x[0]);
-            mgrad(row_index_inc + 1, 4) = -cos(x[1]) * sin(x[4]) * sin(x[3] - x[0]);
+            mgrad(row_index_inc + 0, 4) = dvdec_launch;
+            mgrad(row_index_inc + 1, 4) = dvdec_launch;
 
             // arrival
 
-            mgrad(row_index_inc + 2, index_t0 - 5) = -cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * cos(x[index_t0 - 2] - x[index_t0 - 5]);
-            mgrad(row_index_inc + 3, index_t0 - 5) = -cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * cos(x[index_t0 - 2] - x[index_t0 - 5]);
+            mgrad(row_index_inc + 2, index_t0 - 5) = dra_arrival;
+            mgrad(row_index_inc + 3, index_t0 - 5) = dra_arrival;
 
-            mgrad(row_index_inc + 2, index_t0 - 4) = -sin(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
-            mgrad(row_index_inc + 3, index_t0 - 4) = -sin(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
+            mgrad(row_index_inc + 2, index_t0 - 4) = ddec_arrival;
+            mgrad(row_index_inc + 3, index_t0 - 4) = ddec_arrival;
 
-            mgrad(row_index_inc + 2, index_t0 - 2) = cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * cos(x[index_t0 - 5] - x[index_t0 - 2]);
-            mgrad(row_index_inc + 3, index_t0 - 2) = cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * cos(x[index_t0 - 5] - x[index_t0 - 2]);
+            mgrad(row_index_inc + 2, index_t0 - 2) = dvra_arrival;
+            mgrad(row_index_inc + 3, index_t0 - 2) = dvra_arrival;
 
-            mgrad(row_index_inc + 2, index_t0 - 1) = -cos(x[index_t0 - 4]) * sin(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
-            mgrad(row_index_inc + 3, index_t0 - 1) = -cos(x[index_t0 - 4]) * sin(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
+            mgrad(row_index_inc + 2, index_t0 - 1) = dvdec_arrival;
+            mgrad(row_index_inc + 3, index_t0 - 1) = dvdec_arrival;
+
+            //// launch
+
+            //mgrad(row_index_inc + 0, 0) = -cos(x[1]) * cos(x[4]) * cos(x[3] - x[0]);
+            //mgrad(row_index_inc + 1, 0) = -cos(x[1]) * cos(x[4]) * cos(x[3] - x[0]);
+
+            //mgrad(row_index_inc + 0, 1) = -sin(x[1]) * cos(x[4]) * sin(x[3] - x[0]);
+            //mgrad(row_index_inc + 1, 1) = -sin(x[1]) * cos(x[4]) * sin(x[3] - x[0]);
+
+            //mgrad(row_index_inc + 0, 3) = cos(x[1]) * cos(x[4]) * cos(x[0] - x[3]);
+            //mgrad(row_index_inc + 1, 3) = cos(x[1]) * cos(x[4]) * cos(x[0] - x[3]);
+
+            //mgrad(row_index_inc + 0, 4) = -cos(x[1]) * sin(x[4]) * sin(x[3] - x[0]);
+            //mgrad(row_index_inc + 1, 4) = -cos(x[1]) * sin(x[4]) * sin(x[3] - x[0]);
+
+            //// arrival
+
+            //mgrad(row_index_inc + 2, index_t0 - 5) = -cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * cos(x[index_t0 - 2] - x[index_t0 - 5]);
+            //mgrad(row_index_inc + 3, index_t0 - 5) = -cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * cos(x[index_t0 - 2] - x[index_t0 - 5]);
+
+            //mgrad(row_index_inc + 2, index_t0 - 4) = -sin(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
+            //mgrad(row_index_inc + 3, index_t0 - 4) = -sin(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
+
+            //mgrad(row_index_inc + 2, index_t0 - 2) = cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * cos(x[index_t0 - 5] - x[index_t0 - 2]);
+            //mgrad(row_index_inc + 3, index_t0 - 2) = cos(x[index_t0 - 4]) * cos(x[index_t0 - 1]) * cos(x[index_t0 - 5] - x[index_t0 - 2]);
+
+            //mgrad(row_index_inc + 2, index_t0 - 1) = -cos(x[index_t0 - 4]) * sin(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
+            //mgrad(row_index_inc + 3, index_t0 - 1) = -cos(x[index_t0 - 4]) * sin(x[index_t0 - 1]) * sin(x[index_t0 - 2] - x[index_t0 - 5]);
 
             for (int j = 0; j < m; j++)
             {

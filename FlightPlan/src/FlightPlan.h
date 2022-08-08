@@ -19,7 +19,7 @@ public:
     void add_max_flight_time_constraint(double max_time);
     void add_max_c3_constraint(double c3);
     void add_arrival_eccentricity_constraint(double eccentricity);
-    void add_inclination_constraint(bool launch, double min, double max);
+    void add_inclination_constraint(bool launch, double min, double max, Eigen::Vector3d n);
 
     // 
     // patched conic model functions
@@ -94,8 +94,10 @@ private:
         double eccentricity_arrival;
         double min_inclination_launch;
         double max_inclination_launch;
+        Eigen::Vector3d n_launch;
         double min_inclination_arrival;
         double max_inclination_arrival;
+        Eigen::Vector3d n_arrival;
         double vinf_squared_launch;
         double vcirc_launch;
         double vinf_squared_arrival;

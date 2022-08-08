@@ -31,7 +31,7 @@ PYBIND11_MODULE(ksplib, m) {
     sm_kgs.def("output_vac_ivp", &kerbal_guidance_system::output_vac_ivp, "t"_a, "tout"_a, "steps"_a, "y"_a, "p"_a);
     sm_kgs.def("solve_orbit_burn", &kerbal_guidance_system::solve_orbit_burn, "t"_a, "tout"_a, "y"_a, "p"_a);
 
-    // flight plan functionsb
+    // flight plan functions
     py::module_ sm_intp = m.def_submodule("intp", "interplanetary flight plan module");
     sm_intp.def("interplanetary", &interplanetary::interplanetary, "params"_a, "mode"_a);
     sm_intp.def("trajectory_correction", &interplanetary::trajectory_correction, "r0"_a, "v0"_a, "rf"_a, "vf"_a, "t"_a, "bref"_a, "body_info"_a);
