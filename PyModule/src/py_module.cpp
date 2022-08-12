@@ -33,6 +33,6 @@ PYBIND11_MODULE(ksplib, m) {
 
     // flight plan functions
     py::module_ sm_intp = m.def_submodule("intp", "interplanetary flight plan module");
-    sm_intp.def("interplanetary", &interplanetary::interplanetary, "params"_a, "mode"_a);
+    sm_intp.def("interplanetary", &interplanetary::interplanetary, "params"_a, "mode"_a, "show_errors"_a = false);
     sm_intp.def("trajectory_correction", &interplanetary::trajectory_correction, "r0"_a, "v0"_a, "rf"_a, "vf"_a, "t"_a, "bref"_a, "body_info"_a);
 }

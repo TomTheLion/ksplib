@@ -429,7 +429,7 @@ namespace interplanetary
         return py_result;
     }
 
-    py::dict interplanetary(py::dict py_p, int mode)
+    py::dict interplanetary(py::dict py_p, int mode, bool show_errors)
     {
         try
         {
@@ -519,7 +519,10 @@ namespace interplanetary
         }
         catch (const std::exception& e)
         {
-            std::cerr << e.what() << '\n';
+            if (show_errors)
+            {
+                std::cerr << e.what() << '\n';
+            }      
             return py::dict();
         }
     }

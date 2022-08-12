@@ -34,7 +34,7 @@ namespace astrodynamics
 
 namespace interplanetary
 {
-    py::dict interplanetary(py::dict py_p, int mode);
+    py::dict interplanetary(py::dict py_p, int mode, bool show_errors);
     py::tuple trajectory_correction(py::array_t<double> py_r, py::array_t<double> py_v, py::array_t<double> py_rt, py::array_t<double> py_vt, py::array_t<double> py_t, int bref, py::tuple py_body_info);
 }
 
