@@ -46,7 +46,8 @@ public:
         std::vector<std::vector<double>> vmoon;
     };
 
-    Result output_result(double eps);
+    Result output_result(const double* x, void* f_data);
+    // Result output_result(double eps);
 
 private:
 
@@ -77,13 +78,23 @@ private:
 
     nlopt::opt opt_;
     double day_;
-    double year_;
 
     FlightPlanData data_;
     std::vector<double> x_;
 
     std::tuple<std::vector<double>, std::vector<double>> bounds();
 
-    static void constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
+    static std::vector<double> cartesian_state(const double*& x_ptr, double rho = 0);
+
+    static void free_return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
+    static void free_return_initial_orbit_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
+    static void non_free_return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
+    static void non_free_return_initial_orbit_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
     static double objective(unsigned n, const double* x, double* grad, void* f_data);
+    static double initial_orbit_objective(unsigned n, const double* x, double* grad, void* f_data);
+
+    static void objective_numerical_gradient(unsigned n, const double* x, double* grad,
+        void* f_data, double(*func)(unsigned n, const double* x, double* grad, void* f_data));
+    static void constraint_numerical_gradient(unsigned m, unsigned n, const double* x, double* grad, void* f_data,
+        void(*func)(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data));
 };

@@ -2,6 +2,8 @@
 #include "Ephemeris.h"
 #include <LunarFlightPlan.h>
 
+#include <iostream>
+
 int main()
 {
 	Ephemeris eph = Ephemeris("earth_eph823");
@@ -17,6 +19,16 @@ int main()
 	lfp.set_mission(Jdate(1, 2, 1951), true, 6371000.0 + 250000.0, 1731100.0 + 70000.0);
 
 	lfp.init_model();
+	try
+	{
+		lfp.run_model(1000, 1e-8, 1e-8, 1e-14);
+	}
+	catch (const std::exception& e)
+	{
+		std::cerr << e.what() << '\n';
+		throw e;
+	}
+	
 
 	return 0;
 }
