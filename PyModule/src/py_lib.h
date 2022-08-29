@@ -38,6 +38,11 @@ namespace interplanetary
     py::tuple trajectory_correction(py::array_t<double> py_r, py::array_t<double> py_v, py::array_t<double> py_rt, py::array_t<double> py_vt, py::array_t<double> py_t, int bref, py::tuple py_body_info);
 }
 
+namespace lunar
+{
+    py::dict lunar(py::dict py_p);
+}
+
 namespace kerbal_guidance_system
 {
     void solve_atm_ivp(double t, double tout, py::array_t<double> py_y, py::dict py_p);
@@ -46,3 +51,4 @@ namespace kerbal_guidance_system
     py::array_t<double> output_vac_ivp(double t, double tout, int steps, py::object py_y, py::dict py_p);
     void solve_orbit_burn(double t, double tout, py::object py_y, py::dict py_p);
 }
+

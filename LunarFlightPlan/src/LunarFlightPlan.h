@@ -12,7 +12,7 @@ public:
 	// constraint functions
 	//
 
-    void set_mission(Jdate initial_time, bool free_return, double rp_earth, double rp_moon, double* initial_orbit = nullptr);
+    void set_mission(Jdate initial_time, bool free_return, double rp_earth, double rp_moon, double e_moon);
 	void add_min_flight_time_constraint(double min_time);
 	void add_max_flight_time_constraint(double max_time);
 	void add_inclination_constraint(bool launch, double min, double max, Eigen::Vector3d n);
@@ -22,7 +22,7 @@ public:
 	//
 
     void init_model();
-	void run_model(int max_eval, double eps, double eps_t, double eps_f);
+	void run_model(int max_eval, double eps, double eps_t, double eps_x);
 
     struct Result
     {
@@ -34,6 +34,8 @@ public:
         double velocity_scale;
         std::vector<double> nlopt_solution;
         std::vector<double> nlopt_constraints;
+        std::vector<std::string> bodies;
+        double muk;
         std::vector<double> mu;
         std::vector<double> julian_time;
         std::vector<double> kerbal_time;
@@ -46,8 +48,7 @@ public:
         std::vector<std::vector<double>> vmoon;
     };
 
-    Result output_result(const double* x, void* f_data);
-    // Result output_result(double eps);
+    Result output_result(double eps);
 
 private:
 
@@ -57,11 +58,8 @@ private:
 
     struct FlightPlanData
     {
-        bool initial_orbit;
         bool free_return;
         double initial_time;
-        Eigen::Vector3d initial_position;
-        Eigen::Vector3d initial_velocity;
         double rp_earth;
         double rp_moon;
         double eps;
@@ -73,10 +71,15 @@ private:
         double min_inclination_arrival;
         double max_inclination_arrival;
         Eigen::Vector3d n_arrival;
+        std::string sun;
+        std::string moon;
+        double moon_radius;
+        double moon_soi_radius;
         Ephemeris* ephemeris;
     };
 
     nlopt::opt opt_;
+    double e_moon_;
     double day_;
 
     FlightPlanData data_;
@@ -87,11 +90,10 @@ private:
     static std::vector<double> cartesian_state(const double*& x_ptr, double rho = 0);
 
     static void free_return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
-    static void free_return_initial_orbit_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
     static void non_free_return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
-    static void non_free_return_initial_orbit_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
     static double objective(unsigned n, const double* x, double* grad, void* f_data);
-    static double initial_orbit_objective(unsigned n, const double* x, double* grad, void* f_data);
+    static double free_return_objective(unsigned n, const double* x, double* grad, void* f_data);
+    static double non_free_return_objective(unsigned n, const double* x, double* grad, void* f_data);
 
     static void objective_numerical_gradient(unsigned n, const double* x, double* grad,
         void* f_data, double(*func)(unsigned n, const double* x, double* grad, void* f_data));

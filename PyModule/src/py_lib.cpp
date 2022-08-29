@@ -11,6 +11,8 @@
 #include "Ephemeris.h"
 #include "astrodynamics.h"
 #include "FlightPlan.h"
+#include "LunarFlightPlan.h"
+
 
 namespace jdate
 {
@@ -340,7 +342,6 @@ namespace interplanetary
         return py_list;
     }
 
-
     template<typename T>
     py::array_t<T, py::array::c_style> py_copy_array(std::vector<T> x)
     {
@@ -356,7 +357,6 @@ namespace interplanetary
 
         return py_x;
     }
-
 
     py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<double>> x)
     {
@@ -376,7 +376,6 @@ namespace interplanetary
 
         return py_x;
     }
-
 
     py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<std::vector<double>>> x)
     {
@@ -399,7 +398,6 @@ namespace interplanetary
 
         return py_x;
     }
-
 
     py::dict py_output_result(FlightPlan::Result result)
     {
@@ -743,6 +741,129 @@ namespace interplanetary
     }
 }
 
+namespace lunar
+{
+    template<typename T>
+    py::list py_copy_list(std::vector<T> x)
+    {
+        py::list py_list;
+
+        for (auto& v : x) py_list.append(v);
+
+        return py_list;
+    }
+
+    template<typename T>
+    py::array_t<T, py::array::c_style> py_copy_array(std::vector<T> x)
+    {
+        int l = x.size();
+
+        py::array_t<T, py::array::c_style> py_x({ l });
+        auto mx = py_x.mutable_unchecked();
+
+        for (int i = 0; i < l; i++)
+        {
+            mx(i) = x[i];
+        }
+
+        return py_x;
+    }
+
+    py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<double>> x)
+    {
+        int l = x.size();
+        int m = x[0].size();
+
+        py::array_t<double, py::array::c_style> py_x({ l, m });
+        auto mx = py_x.mutable_unchecked();
+
+        for (int i = 0; i < l; i++)
+        {
+            for (int j = 0; j < m; j++)
+            {
+                mx(i, j) = x[i][j];
+            }
+        }
+
+        return py_x;
+    }
+
+    py::dict py_output_result(LunarFlightPlan::Result result)
+    {
+        py::dict py_result;
+
+        py_result["nlopt_code"] = result.nlopt_code;
+        py_result["nlopt_num_evals"] = result.nlopt_num_evals;
+        py_result["nlopt_value"] = result.nlopt_value;
+        py_result["nlopt_solution"] = py_copy_array(result.nlopt_solution);
+        py_result["nlopt_constraints"] = py_copy_array(result.nlopt_constraints);
+        py_result["time_scale"] = result.time_scale;
+        py_result["distance_scale"] = result.distance_scale;
+        py_result["velocity_scale"] = result.velocity_scale;
+        py_result["bodies"] = py_copy_list(result.bodies);
+        py_result["muk"] = result.muk;
+        py_result["mu"] = py::array_t<double>(result.mu.size(), result.mu.data());
+        py_result["julian_time"] = py::array_t<double>(result.julian_time.size(), result.julian_time.data());
+        py_result["kerbal_time"] = py::array_t<double>(result.kerbal_time.size(), result.kerbal_time.data());
+        py_result["leg"] = py::array_t<int>(result.leg.size(), result.leg.data());
+        py_result["r"] = py_copy_array(result.r);
+        py_result["v"] = py_copy_array(result.v);
+        py_result["rsun"] = py_copy_array(result.rsun);
+        py_result["vsun"] = py_copy_array(result.vsun);
+        py_result["rmoon"] = py_copy_array(result.rmoon);
+        py_result["vmoon"] = py_copy_array(result.vmoon);
+
+        return py_result;
+    }
+
+    py::dict lunar(py::dict py_p)
+    {
+        try
+        {
+            Ephemeris ephemeris = Ephemeris(py_p["ephemeris"].cast<std::string>());
+            LunarFlightPlan flight_plan(ephemeris);
+
+            bool free_return = py_p["free_return"].cast<bool>();
+            Jdate initial_time(py_p["initial_time"].cast<double>());
+            double rp_earth = py_p["rp_earth"].cast<double>();
+            double rp_moon = py_p["rp_moon"].cast<double>();
+            double e_moon = py_p["e_moon"].cast<double>();
+
+            flight_plan.set_mission(initial_time, free_return, rp_earth, rp_moon, e_moon);
+
+            if (!py_p["min_time"].is_none()) flight_plan.add_min_flight_time_constraint(py_p["min_time"].cast<double>());
+            if (!py_p["max_time"].is_none()) flight_plan.add_max_flight_time_constraint(py_p["max_time"].cast<double>());
+            if (!py_p["min_inclination_launch"].is_none() && !py_p["max_inclination_launch"].is_none() && !py_p["n_launch"].is_none())
+            {
+                py::array_t<double> py_n_launch = py_p["n_launch"];
+                Eigen::Vector3d n_launch = { py_n_launch.at(0), py_n_launch.at(1), py_n_launch.at(2) };
+                flight_plan.add_inclination_constraint(
+                    true, py_p["min_inclination_launch"].cast<double>(), py_p["max_inclination_launch"].cast<double>(), n_launch);
+            }
+
+            if (!py_p["min_inclination_arrival"].is_none() && !py_p["max_inclination_arrival"].is_none() && !py_p["n_arrival"].is_none())
+            {
+                py::array_t<double> py_n_arrival = py_p["n_arrival"];
+                Eigen::Vector3d n_arrival = { py_n_arrival.at(0), py_n_arrival.at(1), py_n_arrival.at(2) };
+                flight_plan.add_inclination_constraint(
+                    false, py_p["min_inclination_arrival"].cast<double>(), py_p["max_inclination_arrival"].cast<double>(), n_arrival);
+            }
+
+            flight_plan.init_model();
+
+            flight_plan.run_model(py_p["num_evals"].cast<int>(), py_p["eps"].cast<double>(), py_p["eps_t"].cast<double>(), py_p["eps_x"].cast<double>());
+
+            LunarFlightPlan::Result result = flight_plan.output_result(py_p["eps"].cast<double>());
+
+            return py_output_result(result);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << e.what() << '\n';
+            return py::dict();
+        }
+    }
+}
 
 namespace kerbal_guidance_system
 {
