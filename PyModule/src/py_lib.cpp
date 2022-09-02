@@ -565,8 +565,12 @@ namespace interplanetary
         equation.get_y(6, 36, stms.back().data());
 
         for (int i = 0; i < 6; i++)
-        {
-            result[i] = equation.get_y(i) - equation.get_y(42 + 6 * data->bref + i) - data->xf[i];
+        {    
+            result[i] = equation.get_y(i) - data->xf[i];
+            if (data->bref > -1)
+            {
+                result[i] -= equation.get_y(42 + 6 * data->bref + i);
+            }
         }
 
         if (grad)
@@ -594,8 +598,16 @@ namespace interplanetary
 
     double objective_tcm(unsigned n, const double* x, double* grad, void* f_data)
     {
+        TCMData* data = reinterpret_cast<TCMData*>(f_data);
+
+        int b = 0;
+        if (data->bref == -1)
+        {
+            b = 1;
+        }
+
         double f = 0.0;
-        for (int i = 0; i < n / 3; i++)
+        for (int i = 0; i < n / 3 - b; i++)
         {
             f += sqrt(
                 x[3 * i + 0] * x[3 * i + 0] +
@@ -823,13 +835,30 @@ namespace lunar
             Ephemeris ephemeris = Ephemeris(py_p["ephemeris"].cast<std::string>());
             LunarFlightPlan flight_plan(ephemeris);
 
-            bool free_return = py_p["free_return"].cast<bool>();
+
+            std::string py_mode = py_p["mode"].cast<std::string>();
+            
+            LunarFlightPlan::TrajectoryMode mode;
+
+            if (py_mode == "free_return")
+            {
+                mode = LunarFlightPlan::TrajectoryMode::FREE_RETURN;
+            }
+            else if (py_mode == "leave")
+            {
+                mode = LunarFlightPlan::TrajectoryMode::LEAVE;
+            }
+            else if (py_mode == "return")
+            {
+                mode = LunarFlightPlan::TrajectoryMode::RETURN;
+            }
+
             Jdate initial_time(py_p["initial_time"].cast<double>());
             double rp_earth = py_p["rp_earth"].cast<double>();
             double rp_moon = py_p["rp_moon"].cast<double>();
             double e_moon = py_p["e_moon"].cast<double>();
 
-            flight_plan.set_mission(initial_time, free_return, rp_earth, rp_moon, e_moon);
+            flight_plan.set_mission(initial_time, mode, rp_earth, rp_moon, e_moon);
 
             if (!py_p["min_time"].is_none()) flight_plan.add_min_flight_time_constraint(py_p["min_time"].cast<double>());
             if (!py_p["max_time"].is_none()) flight_plan.add_max_flight_time_constraint(py_p["max_time"].cast<double>());

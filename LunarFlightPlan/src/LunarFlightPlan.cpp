@@ -41,9 +41,9 @@ LunarFlightPlan::~LunarFlightPlan()
 // constraint functions
 //
 
-void LunarFlightPlan::set_mission(Jdate initial_time, bool free_return, double rp_earth, double rp_moon, double e_moon)
+void LunarFlightPlan::set_mission(Jdate initial_time, TrajectoryMode mode, double rp_earth, double rp_moon, double e_moon)
 {
-    data_.free_return = free_return;
+    data_.mode = mode;
     data_.initial_time = data_.ephemeris->get_ephemeris_time(initial_time);
     data_.rp_earth = rp_earth / data_.ephemeris->get_distance_scale();
     data_.rp_moon = rp_moon / data_.ephemeris->get_distance_scale();
@@ -81,19 +81,32 @@ void LunarFlightPlan::init_model()
     double mu_earth = data_.ephemeris->get_muk();
     double mu_moon = data_.ephemeris->get_mu(data_.moon);
 
-    auto [rm0, vm0] = data_.ephemeris->get_position_velocity(data_.moon, data_.initial_time);
-    double dt = sqrt(0.5 * pow(rm0.norm(), 3) / mu_earth);
-    auto [rm1, vm1] = data_.ephemeris->get_position_velocity(data_.moon, data_.initial_time + dt);
+    auto [rm, vm] = data_.ephemeris->get_position_velocity(data_.moon, data_.initial_time);
+    double dt = sqrt(0.5 * pow(rm.norm(), 3) / mu_earth);
+    if (data_.mode != TrajectoryMode::RETURN)
+    {
+        std::tie(rm, vm) = data_.ephemeris->get_position_velocity(data_.moon, data_.initial_time + dt);
+    }
 
-    Eigen::Vector3d n = rm1.cross(vm1).normalized();
+    Eigen::Vector3d n = rm.cross(vm).normalized();
 
-    double min_e_earth = (rm0.norm() - data_.rp_earth) / (rm0.norm() + data_.rp_earth);
+    double min_e_earth = (rm.norm() - data_.rp_earth) / (rm.norm() + data_.rp_earth);
 
-    Eigen::Vector3d r0 = -data_.rp_earth * rm1.normalized();
-    Eigen::Vector3d v0 = sqrt((1.0 + min_e_earth) * mu_earth / data_.rp_earth) * rm1.cross(n).normalized();
+    Eigen::Vector3d r0 = -data_.rp_earth * rm.normalized();
+    Eigen::Vector3d v0 = sqrt((1.0 + min_e_earth) * mu_earth / data_.rp_earth) * rm.cross(n).normalized();
 
-    Eigen::Vector3d r1 = data_.rp_moon * rm1.normalized();
-    Eigen::Vector3d v1 = sqrt((1.0 + e_moon_) * mu_moon / data_.rp_moon) * rm1.cross(n).normalized();
+    Eigen::Vector3d r1, v1;
+
+    if (data_.mode == TrajectoryMode::RETURN && data_.n_launch.dot(n) > 0)
+    {
+        v1 = -sqrt((1.0 + e_moon_) * mu_moon / data_.rp_moon) * rm;
+        r1 = data_.rp_moon * v1.cross(n).normalized();
+    }
+    else
+    {
+        r1 = data_.rp_moon * rm.normalized();
+        v1 = sqrt((1.0 + e_moon_) * mu_moon / data_.rp_moon) * rm.cross(n).normalized();
+    }
 
     auto push_back_state = [](std::vector<double>& x, Eigen::Vector3d r, Eigen::Vector3d v, bool radius)
     {
@@ -108,7 +121,7 @@ void LunarFlightPlan::init_model()
         x.push_back(asin(v(1) / v.norm()));
     };
 
-    if (data_.free_return)
+    if (data_.mode == TrajectoryMode::FREE_RETURN)
     {
         push_back_state(x_, r0, v0, false);
         push_back_state(x_, r1, v1, true);
@@ -144,7 +157,7 @@ void LunarFlightPlan::run_model(int max_eval, double eps, double eps_t, double e
     int n = 17;
     int m = 14;
 
-    if (data_.free_return)
+    if (data_.mode == TrajectoryMode::FREE_RETURN)
     {
         n += 7;
         m += 7;
@@ -161,15 +174,21 @@ void LunarFlightPlan::run_model(int max_eval, double eps, double eps_t, double e
     opt_ = nlopt::opt("LD_SLSQP", n);
     opt_.set_lower_bounds(lower_bounds);
     opt_.set_upper_bounds(upper_bounds);
-    if (data_.free_return)
+
+    switch (data_.mode)
     {
+    case TrajectoryMode::FREE_RETURN:
         opt_.set_min_objective(free_return_objective, &data_);
         opt_.add_equality_mconstraint(free_return_constraints, &data_, tol);
-    }
-    else
-    {
-        opt_.set_min_objective(non_free_return_objective, &data_);
-        opt_.add_equality_mconstraint(non_free_return_constraints, &data_, tol);
+        break;
+    case TrajectoryMode::LEAVE:
+        opt_.set_min_objective(leave_objective, &data_);
+        opt_.add_equality_mconstraint(leave_constraints, &data_, tol);
+        break;
+    case TrajectoryMode::RETURN:
+        opt_.set_min_objective(return_objective, &data_);
+        opt_.add_equality_mconstraint(return_constraints, &data_, tol);
+        break;
     }
     
     opt_.set_maxeval(max_eval);
@@ -184,7 +203,7 @@ LunarFlightPlan::Result LunarFlightPlan::output_result(double eps)
     int n = 17;
     int m = 14;
 
-    if (data_.free_return)
+    if (data_.mode == TrajectoryMode::FREE_RETURN)
     {
         n += 7;
         m += 7;
@@ -212,15 +231,6 @@ LunarFlightPlan::Result LunarFlightPlan::output_result(double eps)
     }
 
     result.nlopt_solution = x_;
-
-    if (data_.free_return)
-    {
-        free_return_constraints(m, result.nlopt_constraints.data(), n, x_.data(), NULL, &data_);
-    }
-    else
-    {
-        non_free_return_constraints(m, result.nlopt_constraints.data(), n, x_.data(), NULL, &data_);
-    }
 
     result.time_scale = data_.ephemeris->get_time_scale();
     result.distance_scale = data_.ephemeris->get_distance_scale();
@@ -276,64 +286,97 @@ LunarFlightPlan::Result LunarFlightPlan::output_result(double eps)
         }
     };
 
-    if (data_.free_return)
+    switch (data_.mode)
     {
-        free_return_constraints(m, result.nlopt_constraints.data(), n, x_.data(), NULL, &data_);
+    case TrajectoryMode::FREE_RETURN:
+        {
+            free_return_constraints(m, result.nlopt_constraints.data(), n, x_.data(), NULL, &data_);
 
-        // parse inputs
-        std::vector<double> y0 = cartesian_state(x_ptr, data_.rp_earth);
-        std::vector<double> y1 = cartesian_state(x_ptr);
-        std::vector<double> y2 = cartesian_state(x_ptr, data_.rp_earth);
+            // parse inputs
+            std::vector<double> y0 = cartesian_state(x_ptr, data_.rp_earth);
+            std::vector<double> y1 = cartesian_state(x_ptr);
+            std::vector<double> y2 = cartesian_state(x_ptr, data_.rp_earth);
 
-        double t0 = data_.initial_time;
-        double dt1 = *x_ptr++;
-        double dt2 = *x_ptr++;
+            double t0 = data_.initial_time;
+            double dt1 = *x_ptr++;
+            double dt2 = *x_ptr++;
 
-        auto [rm, vm] = data_.ephemeris->get_position_velocity(data_.moon, t0 + dt1);
+            auto [rm, vm] = data_.ephemeris->get_position_velocity(data_.moon, t0 + dt1);
 
-        y1[0] += rm(0);
-        y1[1] += rm(1);
-        y1[2] += rm(2);
-        y1[3] += vm(0);
-        y1[4] += vm(1);
-        y1[5] += vm(2);
+            y1[0] += rm(0);
+            y1[1] += rm(1);
+            y1[2] += rm(2);
+            y1[3] += vm(0);
+            y1[4] += vm(1);
+            y1[5] += vm(2);
 
-        // integrate
-        Equation equation0 = Equation(astrodynamics::n_body_df_ephemeris, y0.size(), y0.data(), t0, data_.eps, data_.eps, &p);
-        Equation equation1 = Equation(astrodynamics::n_body_df_ephemeris, y1.size(), y1.data(), t0 + dt1, data_.eps, data_.eps, &p);
-        Equation equation2 = Equation(astrodynamics::n_body_df_ephemeris, y2.size(), y2.data(), t0 + dt1 + dt2, data_.eps, data_.eps, &p);
+            // integrate
+            Equation equation0 = Equation(astrodynamics::n_body_df_ephemeris, y0.size(), y0.data(), t0, data_.eps, data_.eps, &p);
+            Equation equation1 = Equation(astrodynamics::n_body_df_ephemeris, y1.size(), y1.data(), t0 + dt1, data_.eps, data_.eps, &p);
+            Equation equation2 = Equation(astrodynamics::n_body_df_ephemeris, y2.size(), y2.data(), t0 + dt1 + dt2, data_.eps, data_.eps, &p);
 
-        output(equation0, 0, t0, t0 + 0.5 * dt1);
-        output(equation1, 1, t0 + 0.5 * dt1, t0 + dt1);
-        output(equation1, 2, t0 + dt1, t0 + dt1 + 0.5 * dt2);
-        output(equation2, 3, t0 + dt1 + 0.5 * dt2, t0 + dt1 + dt2);
-    }
-    else
-    {
-        non_free_return_constraints(m, result.nlopt_constraints.data(), n, x_.data(), NULL, &data_);
+            output(equation0, 0, t0, t0 + 0.5 * dt1);
+            output(equation1, 1, t0 + 0.5 * dt1, t0 + dt1);
+            output(equation1, 2, t0 + dt1, t0 + dt1 + 0.5 * dt2);
+            output(equation2, 3, t0 + dt1 + 0.5 * dt2, t0 + dt1 + dt2);
+            break;
+        }
+    case TrajectoryMode::LEAVE:
+        {
+            leave_constraints(m, result.nlopt_constraints.data(), n, x_.data(), NULL, &data_);
 
-        // parse inputs
-        std::vector<double> y0 = cartesian_state(x_ptr, data_.rp_earth);
-        std::vector<double> y1 = cartesian_state(x_ptr, data_.rp_moon);
+            // parse inputs
+            std::vector<double> y0 = cartesian_state(x_ptr, data_.rp_earth);
+            std::vector<double> y1 = cartesian_state(x_ptr, data_.rp_moon);
 
-        double t0 = data_.initial_time;
-        double dt = *x_ptr++;
+            double t0 = data_.initial_time;
+            double dt = *x_ptr++;
 
-        auto [rm, vm] = data_.ephemeris->get_position_velocity(data_.moon, t0 + dt);
+            auto [rm, vm] = data_.ephemeris->get_position_velocity(data_.moon, t0 + dt);
 
-        y1[0] += rm(0);
-        y1[1] += rm(1);
-        y1[2] += rm(2);
-        y1[3] += vm(0);
-        y1[4] += vm(1);
-        y1[5] += vm(2);
+            y1[0] += rm(0);
+            y1[1] += rm(1);
+            y1[2] += rm(2);
+            y1[3] += vm(0);
+            y1[4] += vm(1);
+            y1[5] += vm(2);
 
-        // integrate
-        Equation equation0 = Equation(astrodynamics::n_body_df_ephemeris, y0.size(), y0.data(), t0, data_.eps, data_.eps, &p);
-        Equation equation1 = Equation(astrodynamics::n_body_df_ephemeris, y1.size(), y1.data(), t0 + dt, data_.eps, data_.eps, &p);
+            // integrate
+            Equation equation0 = Equation(astrodynamics::n_body_df_ephemeris, y0.size(), y0.data(), t0, data_.eps, data_.eps, &p);
+            Equation equation1 = Equation(astrodynamics::n_body_df_ephemeris, y1.size(), y1.data(), t0 + dt, data_.eps, data_.eps, &p);
 
-        output(equation0, 0, t0, t0 + 0.5 * dt);
-        output(equation1, 1, t0 + 0.5 * dt, t0 + dt);
+            output(equation0, 0, t0, t0 + 0.5 * dt);
+            output(equation1, 1, t0 + 0.5 * dt, t0 + dt);
+            break;
+        }
+    case TrajectoryMode::RETURN:
+        {
+            return_constraints(m, result.nlopt_constraints.data(), n, x_.data(), NULL, &data_);
+
+            // parse inputs
+            std::vector<double> y1 = cartesian_state(x_ptr, data_.rp_earth);
+            std::vector<double> y0 = cartesian_state(x_ptr, data_.rp_moon);
+
+            double t0 = data_.initial_time;
+            double dt = *x_ptr++;
+
+            auto [rm, vm] = data_.ephemeris->get_position_velocity(data_.moon, t0);
+
+            y0[0] += rm(0);
+            y0[1] += rm(1);
+            y0[2] += rm(2);
+            y0[3] += vm(0);
+            y0[4] += vm(1);
+            y0[5] += vm(2);
+
+            // integrate
+            Equation equation0 = Equation(astrodynamics::n_body_df_ephemeris, y0.size(), y0.data(), t0, data_.eps, data_.eps, &p);
+            Equation equation1 = Equation(astrodynamics::n_body_df_ephemeris, y1.size(), y1.data(), t0 + dt, data_.eps, data_.eps, &p);
+
+            output(equation0, 0, t0, t0 + 0.5 * dt);
+            output(equation1, 1, t0 + 0.5 * dt, t0 + dt);
+            break;
+        }
     }
 
     return result;
@@ -381,7 +424,7 @@ std::tuple<std::vector<double>, std::vector<double>> LunarFlightPlan::bounds()
         upper_bounds.push_back(2.0 * astrodynamics::pi);
     };
 
-    if (data_.free_return)
+    if (data_.mode == TrajectoryMode::FREE_RETURN)
     {
         push_back_state_bounds(lower_bounds, upper_bounds, mu_earth, data_.rp_earth, min_e_earth, false);
         push_back_state_bounds(lower_bounds, upper_bounds, mu_moon, data_.rp_moon, min_e_moon, true);
@@ -569,7 +612,7 @@ void LunarFlightPlan::free_return_constraints(unsigned m, double* result, unsign
     }
 }
 
-void LunarFlightPlan::non_free_return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data)
+void LunarFlightPlan::leave_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data)
 {
     try
     {
@@ -657,7 +700,106 @@ void LunarFlightPlan::non_free_return_constraints(unsigned m, double* result, un
         // calculate gradients
         if (grad)
         {
-            constraint_numerical_gradient(m, n, x, grad, f_data, non_free_return_constraints);
+            constraint_numerical_gradient(m, n, x, grad, f_data, leave_constraints);
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "error in constraint function:" << '\n';
+        std::cerr << e.what() << '\n';
+        throw e;
+    }
+}
+
+void LunarFlightPlan::return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data)
+{
+    try
+    {
+        FlightPlanData* data = reinterpret_cast<FlightPlanData*>(f_data);
+
+        const double* x_ptr = x;
+        double* result_ptr = result;
+
+        // parse inputs
+        std::vector<double> y1 = cartesian_state(x_ptr, data->rp_earth);
+        std::vector<double> y0 = cartesian_state(x_ptr, data->rp_moon);
+
+        double t0 = data->initial_time;
+        double dt = *x_ptr++;
+
+        auto [rm, vm] = data->ephemeris->get_position_velocity(data->moon, t0);
+
+        y0[0] += rm(0);
+        y0[1] += rm(1);
+        y0[2] += rm(2);
+        y0[3] += vm(0);
+        y0[4] += vm(1);
+        y0[5] += vm(2);
+
+        double min_launch_inc_slack = *x_ptr++;
+        double max_launch_inc_slack = *x_ptr++;
+        double min_arrival_inc_slack = *x_ptr++;
+        double max_arrival_inc_slack = *x_ptr++;
+        double min_time_slack = *x_ptr++;
+        double max_time_slack = *x_ptr++;
+
+        // integrate
+        astrodynamics::NBodyEphemerisParams p({ data->ephemeris });
+
+        Equation equation0 = Equation(astrodynamics::n_body_df_ephemeris, y0.size(), y0.data(), t0, data->eps, data->eps, &p);
+        Equation equation1 = Equation(astrodynamics::n_body_df_ephemeris, y1.size(), y1.data(), t0 + dt, data->eps, data->eps, &p);
+
+        // calculate constraints
+
+        // match point constraints
+        std::vector<double> yff(6);
+        std::vector<double> yfb(6);
+
+        equation0.step(t0 + 0.5 * dt);
+        equation0.get_y(0, 6, yff.data());
+
+        equation1.step(t0 + 0.5 * dt);
+        equation1.get_y(0, 6, yfb.data());
+
+        for (int i = 0; i < 6; i++)
+        {
+            *result_ptr++ = yff[i] - yfb[i];
+        }
+
+        auto calc_fpa = [](double ra, double dec, double vra, double vdec)
+        {
+            return cos(dec) * cos(vdec) * cos(ra - vra) + sin(dec) * sin(vdec);
+        };
+
+        // flight path angle constraints
+        *result_ptr++ = calc_fpa(x[5], x[6], x[8], x[9]);
+        *result_ptr++ = calc_fpa(x[0], x[1], x[3], x[4]);
+
+        // inclination constraints
+        auto calc_h = [](double ra, double dec, double vra, double vdec)
+        {
+            Eigen::Vector3d r = { cos(ra) * cos(dec), sin(dec), sin(ra) * cos(dec) };
+            Eigen::Vector3d v = { cos(vra) * cos(vdec), sin(vdec), sin(vra) * cos(vdec) };
+            return r.cross(v);
+        };
+
+        double cosi_launch = data->n_launch.dot(calc_h(x[5], x[6], x[8], x[9]));
+        double cosi_arrival = data->n_arrival.dot(calc_h(x[0], x[1], x[3], x[4]));
+
+        *result_ptr++ = cosi_launch - cos(data->min_inclination_launch) + min_launch_inc_slack;
+        *result_ptr++ = cosi_launch - cos(data->max_inclination_launch) - max_launch_inc_slack;
+
+        *result_ptr++ = cosi_arrival - cos(data->min_inclination_arrival) + min_arrival_inc_slack;
+        *result_ptr++ = cosi_arrival - cos(data->max_inclination_arrival) - max_arrival_inc_slack;
+
+        // time constraints
+        *result_ptr++ = dt - data->min_time - min_time_slack;
+        *result_ptr++ = dt - data->max_time + max_time_slack;
+
+        // calculate gradients
+        if (grad)
+        {
+            constraint_numerical_gradient(m, n, x, grad, f_data, return_constraints);
         }
     }
     catch (const std::exception& e)
@@ -690,7 +832,7 @@ double LunarFlightPlan::free_return_objective(unsigned n, const double* x, doubl
     
 }
 
-double LunarFlightPlan::non_free_return_objective(unsigned n, const double* x, double* grad, void* f_data)
+double LunarFlightPlan::leave_objective(unsigned n, const double* x, double* grad, void* f_data)
 {
     try
     {
@@ -698,10 +840,32 @@ double LunarFlightPlan::non_free_return_objective(unsigned n, const double* x, d
 
         if (grad)
         {
-            objective_numerical_gradient(n, x, grad, f_data, non_free_return_objective);
+            objective_numerical_gradient(n, x, grad, f_data, leave_objective);
         }
 
         return x[2] + x[7];
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "error in objective function:" << '\n';
+        std::cerr << e.what() << '\n';
+        throw e;
+    }
+
+}
+
+double LunarFlightPlan::return_objective(unsigned n, const double* x, double* grad, void* f_data)
+{
+    try
+    {
+        FlightPlanData* data = reinterpret_cast<FlightPlanData*>(f_data);
+
+        if (grad)
+        {
+            objective_numerical_gradient(n, x, grad, f_data, return_objective);
+        }
+
+        return x[7];
     }
     catch (const std::exception& e)
     {

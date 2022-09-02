@@ -14,7 +14,7 @@ int main()
 	//void add_max_flight_time_constraint(double max_time);
 	//void add_inclination_constraint(bool launch, double min, double max, Eigen::Vector3d n);
 
-	lfp.set_mission(Jdate(1, 2, 1951), true, 6371000.0 + 250000.0, 1731100.0 + 170000.0, 1.3);
+	lfp.set_mission(Jdate(1, 2, 1951), LunarFlightPlan::TrajectoryMode::RETURN, 6371000.0 + 250000.0, 1731100.0 + 170000.0, 1.3);
 	// lfp.add_min_flight_time_constraint(2.0);
 	// lfp.add_max_flight_time_constraint(2.9);
 	// lfp.add_inclination_constraint(true, 28.0, 70.0, Eigen::Vector3d::UnitY());

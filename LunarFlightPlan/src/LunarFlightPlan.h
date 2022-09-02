@@ -8,11 +8,18 @@ public:
 
 	~LunarFlightPlan();
 
+    enum class TrajectoryMode
+    {
+        FREE_RETURN,
+        LEAVE,
+        RETURN
+    };
+
 	//
 	// constraint functions
 	//
 
-    void set_mission(Jdate initial_time, bool free_return, double rp_earth, double rp_moon, double e_moon);
+    void set_mission(Jdate initial_time, TrajectoryMode mode, double rp_earth, double rp_moon, double e_moon);
 	void add_min_flight_time_constraint(double min_time);
 	void add_max_flight_time_constraint(double max_time);
 	void add_inclination_constraint(bool launch, double min, double max, Eigen::Vector3d n);
@@ -58,7 +65,7 @@ private:
 
     struct FlightPlanData
     {
-        bool free_return;
+        TrajectoryMode mode;
         double initial_time;
         double rp_earth;
         double rp_moon;
@@ -76,6 +83,7 @@ private:
         double moon_radius;
         double moon_soi_radius;
         Ephemeris* ephemeris;
+        int count = 0;
     };
 
     nlopt::opt opt_;
@@ -90,10 +98,11 @@ private:
     static std::vector<double> cartesian_state(const double*& x_ptr, double rho = 0);
 
     static void free_return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
-    static void non_free_return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
-    static double objective(unsigned n, const double* x, double* grad, void* f_data);
+    static void leave_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
+    static void return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
     static double free_return_objective(unsigned n, const double* x, double* grad, void* f_data);
-    static double non_free_return_objective(unsigned n, const double* x, double* grad, void* f_data);
+    static double leave_objective(unsigned n, const double* x, double* grad, void* f_data);
+    static double return_objective(unsigned n, const double* x, double* grad, void* f_data);
 
     static void objective_numerical_gradient(unsigned n, const double* x, double* grad,
         void* f_data, double(*func)(unsigned n, const double* x, double* grad, void* f_data));
