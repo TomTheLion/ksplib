@@ -3,13 +3,13 @@
 #include <nlopt.hpp>
 #include "astrodynamics.h"
 
-class LunarFlightPlan
+class ConicLunarFlightPlan
 {
 public:
 
-	LunarFlightPlan(Ephemeris& ephemeris);
+	ConicLunarFlightPlan(astrodynamics::ConicBody& planet, astrodynamics::ConicBody& moon);
 
-	~LunarFlightPlan();
+	~ConicLunarFlightPlan();
 
     enum class TrajectoryMode
     {
@@ -22,7 +22,7 @@ public:
 	// constraint functions
 	//
 
-    void set_mission(Jdate initial_time, TrajectoryMode mode, double rp_earth, double rp_moon, double e_moon);
+    void set_mission(double initial_time, TrajectoryMode mode, double rp_planet, double rp_moon, double e_moon);
 	void add_min_flight_time_constraint(double min_time);
 	void add_max_flight_time_constraint(double max_time);
 	void add_inclination_constraint(bool launch, double min, double max, Eigen::Vector3d n);
@@ -39,21 +39,12 @@ public:
         int nlopt_code;
         int nlopt_num_evals;
         double nlopt_value;
-        double time_scale;
-        double distance_scale;
-        double velocity_scale;
         std::vector<double> nlopt_solution;
         std::vector<double> nlopt_constraints;
-        std::vector<std::string> bodies;
-        double muk;
-        std::vector<double> mu;
-        std::vector<double> julian_time;
-        std::vector<double> kerbal_time;
+        std::vector<double> time;
         std::vector<int> leg;
         std::vector<std::vector<double>> r;
         std::vector<std::vector<double>> v;
-        std::vector<std::vector<double>> rsun;
-        std::vector<std::vector<double>> vsun;
         std::vector<std::vector<double>> rmoon;
         std::vector<std::vector<double>> vmoon;
     };
@@ -70,7 +61,7 @@ private:
     {
         TrajectoryMode mode;
         double initial_time;
-        double rp_earth;
+        double rp_planet;
         double rp_moon;
         double eps;
         double min_time;
@@ -81,24 +72,20 @@ private:
         double min_inclination_arrival;
         double max_inclination_arrival;
         Eigen::Vector3d n_arrival;
-        std::string sun;
-        std::string moon;
-        double moon_radius;
-        double moon_soi_radius;
-        Ephemeris* ephemeris;
+        astrodynamics::ConicBody* planet;
+        astrodynamics::ConicBody* moon;
         int count = 0;
     };
 
     nlopt::opt opt_;
     double e_moon_;
-    double day_;
 
     FlightPlanData data_;
     std::vector<double> x_;
 
     std::tuple<std::vector<double>, std::vector<double>> bounds();
 
-    static std::vector<double> cartesian_state(const double*& x_ptr, double rho = 0);
+    static std::tuple<Eigen::Vector3d, Eigen::Vector3d> cartesian_state(const double*& x_ptr, double rho = 0);
 
     static void free_return_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
     static void leave_constraints(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);

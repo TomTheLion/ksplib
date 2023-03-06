@@ -1,5 +1,9 @@
 #pragma once
 
+#include <Eigen/Dense>
+#include "Ephemeris.h"
+#include "Orbit.h"
+
 namespace astrodynamics
 {
     //
@@ -32,6 +36,14 @@ namespace astrodynamics
         double reference_time_scale;
         double reference_distance_scale;
         double reference_velocity_scale;
+    };
+
+    struct ConicBody
+    {
+        Orbit* orbit;
+        double mu;
+        double soi;
+        double radius;
     };
 
     //

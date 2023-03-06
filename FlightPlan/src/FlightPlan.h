@@ -1,5 +1,8 @@
 #pragma once
 
+#include <nlopt.hpp>
+#include "astrodynamics.h"
+
 class FlightPlan
 {
 public:

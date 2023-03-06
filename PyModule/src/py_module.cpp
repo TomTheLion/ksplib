@@ -39,4 +39,18 @@ PYBIND11_MODULE(ksplib, m) {
     // lunar flight plan functions
     py::module_ sm_lunar = m.def_submodule("lunar", "lunar flight plan module");
     sm_lunar.def("lunar", &lunar::lunar, "params"_a);
+
+    // conic functions
+    py::module_ sm_conic = m.def_submodule("conic", "conic module");
+    sm_conic.def("test", &conic::test, 
+        "gravitational_parameter"_a,
+        "semi_major_axis"_a,
+        "eccentricity"_a,
+        "inclination"_a,
+        "longitude_of_ascending_node"_a,
+        "argument_of_periapsis"_a,
+        "mean_anomaly_at_epoch"_a,
+        "epoch"_a,
+        "py_t"_a);
+    sm_conic.def("lunar", &conic::lunar, "params"_a);
 }

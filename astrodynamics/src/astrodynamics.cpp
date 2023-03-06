@@ -1,9 +1,6 @@
 #include <string>
 #include <tuple>
 
-#include <Eigen/Dense>
-
-#include "Ephemeris.h"
 #include "astrodynamics.h"
 
 namespace astrodynamics

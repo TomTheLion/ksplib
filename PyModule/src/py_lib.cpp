@@ -6,12 +6,11 @@
 
 #include "py_lib.h"
 
-#include "Jdate.h"
 #include "Spl.h"
-#include "Ephemeris.h"
 #include "astrodynamics.h"
 #include "FlightPlan.h"
 #include "LunarFlightPlan.h"
+#include "ConicLunarFlightPlan.h"
 
 
 namespace jdate
@@ -1241,5 +1240,197 @@ namespace kerbal_guidance_system
     {
         VacStateParams p = init_vac_state_params(py_p);
         return output_ivp(t, tout, steps, py_y, py_p, vac_state, output_vac_state, &p);
+    }
+}
+
+
+namespace conic
+{
+    py::list test(
+        double gravitational_parameter,
+        double semi_major_axis,
+        double eccentricity,
+        double inclination,
+        double longitude_of_ascending_node,
+        double argument_of_periapsis,
+        double mean_anomaly_at_epoch,
+        double epoch,
+        py::list py_t)
+    {
+        Orbit orbit;
+
+        orbit = Orbit(
+            gravitational_parameter,
+            semi_major_axis,
+            eccentricity,
+            inclination,
+            longitude_of_ascending_node,
+            argument_of_periapsis,
+            mean_anomaly_at_epoch,
+            epoch);
+
+        py::list lst;
+
+        for (int i = 0; i < py_t.size(); i++)
+        {
+            double t = py_t[i].cast<double>();
+
+            py::list lst2;
+
+            Eigen::Vector3d r = orbit.get_position(t);
+            Eigen::Vector3d v = orbit.get_velocity(t);
+            Eigen::Vector3d a = orbit.get_acceleration(t);
+
+            lst2.append(r(0));
+            lst2.append(r(1));
+            lst2.append(r(2));
+            lst2.append(v(0));
+            lst2.append(v(1));
+            lst2.append(v(2));
+            lst2.append(a(0));
+            lst2.append(a(1));
+            lst2.append(a(2));
+
+            lst.append(lst2);
+        }
+
+        return lst;
+    }
+
+    template<typename T>
+    py::list py_copy_list(std::vector<T> x)
+    {
+        py::list py_list;
+
+        for (auto& v : x) py_list.append(v);
+
+        return py_list;
+    }
+
+    template<typename T>
+    py::array_t<T, py::array::c_style> py_copy_array(std::vector<T> x)
+    {
+        int l = x.size();
+
+        py::array_t<T, py::array::c_style> py_x({ l });
+        auto mx = py_x.mutable_unchecked();
+
+        for (int i = 0; i < l; i++)
+        {
+            mx(i) = x[i];
+        }
+
+        return py_x;
+    }
+
+    py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<double>> x)
+    {
+        int l = x.size();
+        int m = x[0].size();
+
+        py::array_t<double, py::array::c_style> py_x({ l, m });
+        auto mx = py_x.mutable_unchecked();
+
+        for (int i = 0; i < l; i++)
+        {
+            for (int j = 0; j < m; j++)
+            {
+                mx(i, j) = x[i][j];
+            }
+        }
+
+        return py_x;
+    }
+
+    py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<std::vector<double>>> x)
+    {
+        int l = x.size();
+        int m = x[0].size();
+        int n = x[0][0].size();
+        py::array_t<double, py::array::c_style> py_x({ l, m, n });
+        auto mx = py_x.mutable_unchecked();
+
+        for (int i = 0; i < l; i++)
+        {
+            for (int j = 0; j < m; j++)
+            {
+                for (int k = 0; k < n; k++)
+                {
+                    mx(i, j, k) = x[i][j][k];
+                }
+            }
+        }
+
+        return py_x;
+    }
+
+    py::dict py_output_result(ConicLunarFlightPlan::Result result)
+    {
+        py::dict py_result;
+
+        py_result["nlopt_code"] = result.nlopt_code;
+        py_result["nlopt_num_evals"] = result.nlopt_num_evals;
+        py_result["nlopt_value"] = result.nlopt_value;
+        py_result["nlopt_solution"] = py_copy_array(result.nlopt_solution);
+        py_result["nlopt_constraints"] = py_copy_array(result.nlopt_constraints);
+        py_result["time"] = py::array_t<double>(result.time.size(), result.time.data());
+        py_result["leg"] = py::array_t<int>(result.leg.size(), result.leg.data());
+        py_result["r"] = py_copy_array(result.r);
+        py_result["v"] = py_copy_array(result.v);
+        py_result["rmoon"] = py_copy_array(result.rmoon);
+        py_result["vmoon"] = py_copy_array(result.vmoon);
+
+        return py_result;
+    }
+
+    py::dict lunar(py::dict py_p)
+    {
+        try
+        {
+            Orbit planet_orbit = Orbit(
+                1.1723328e18,		// gravitational_parameter
+                1.3599840256e10,	// semi_major_axis
+                0.0,				// eccentricity
+                0.0,				// inclination
+                0.0,				// longitude_of_ascending_node
+                0.0,				// argument_of_periapsis
+                3.14,				// mean_anomaly_at_epoch
+                0.0);				// epoch
+
+            Orbit moon_orbit = Orbit(
+                3.5316e12,	// gravitational_parameter
+                1.2e7,		// semi_major_axis
+                0.0,		// eccentricity
+                0.0,		// inclination
+                0.0,		// longitude_of_ascending_node
+                0.0,		// argument_of_periapsis
+                1.7,		// mean_anomaly_at_epoch
+                0.0);		// epoch
+
+            astrodynamics::ConicBody moon = { &moon_orbit, 6.5138398e10, 2.4295591e6, 2.0e5 };
+            astrodynamics::ConicBody planet = { &planet_orbit, 3.5316e12, 8.4159287, 6.0e5 };
+
+            ConicLunarFlightPlan clfp(planet, moon);
+            clfp.set_mission(
+                py_p["initial_time"].cast<double>(), 
+                ConicLunarFlightPlan::TrajectoryMode::LEAVE, 
+                py_p["rp_planet"].cast<double>(), 
+                py_p["rp_moon"].cast<double>(), 
+                py_p["e_moon"].cast<double>());
+
+
+            clfp.init_model();
+            clfp.run_model(2000, 1e-8, 1e-8, 1e-8);
+            ConicLunarFlightPlan::Result res = clfp.output_result(1e-8);
+
+            ConicLunarFlightPlan::Result result = clfp.output_result(py_p["eps"].cast<double>());
+
+            return py_output_result(result);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << e.what() << '\n';
+            return py::dict();
+        }
     }
 }

@@ -3,12 +3,7 @@
 #include <vector>
 
 #include <Eigen/Dense>
-#include <nlopt.hpp>
 
-#include "Jdate.h"
-#include "Equation.h"
-#include "Ephemeris.h"
-#include "astrodynamics.h"
 #include "FlightPlan.h"
 
 // create an initialized FlightPlan object

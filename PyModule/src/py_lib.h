@@ -52,3 +52,17 @@ namespace kerbal_guidance_system
     void solve_orbit_burn(double t, double tout, py::object py_y, py::dict py_p);
 }
 
+namespace conic
+{
+    py::list test(
+        double gravitational_parameter,
+        double semi_major_axis,
+        double eccentricity,
+        double inclination,
+        double longitude_of_ascending_node,
+        double argument_of_periapsis,
+        double mean_anomaly_at_epoch,
+        double epoch,
+        py::list py_t);
+    py::dict lunar(py::dict py_p);
+}
