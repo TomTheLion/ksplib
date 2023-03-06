@@ -12,6 +12,103 @@
 #include "LunarFlightPlan.h"
 #include "ConicLunarFlightPlan.h"
 
+double* py_arr_ptr(py::object obj)
+{
+    return static_cast<double*>(obj.cast<py::array_t<double>>().request().ptr);
+}
+
+int py_arr_size(py::object obj)
+{
+    return obj.cast<py::array_t<double>>().request().size;
+}
+
+Eigen::Vector3d py_vector3d(py::object obj)
+{
+    return Eigen::Map<Eigen::Vector3d>(py_arr_ptr(obj.cast<py::array_t<double>>()));
+}
+
+Spl py_spl(py::object obj)
+{
+    py::tuple tup = obj;
+    Spl s = { py_arr_ptr(tup[0]), py_arr_ptr(tup[1]), py_arr_size(tup[0]), tup[2].cast<int>() };
+    return s;
+}
+
+Spl py_bspl(py::object obj) {
+    py::tuple tup = obj;
+    Spl s = {
+        py_arr_ptr(tup[0]), py_arr_ptr(tup[1]), py_arr_ptr(tup[2]),
+        py_arr_size(tup[0]), py_arr_size(tup[1]),
+        tup[3].cast<int>(), tup[4].cast<int>() };
+    return s;
+}
+
+template<typename T>
+py::list py_copy_list(std::vector<T> x)
+{
+    py::list py_list;
+
+    for (auto& v : x) py_list.append(v);
+
+    return py_list;
+}
+
+template<typename T>
+py::array_t<T, py::array::c_style> py_copy_array(std::vector<T> x)
+{
+    int l = x.size();
+
+    py::array_t<T, py::array::c_style> py_x({ l });
+    auto mx = py_x.mutable_unchecked();
+
+    for (int i = 0; i < l; i++)
+    {
+        mx(i) = x[i];
+    }
+
+    return py_x;
+}
+
+py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<double>> x)
+{
+    int l = x.size();
+    int m = x[0].size();
+
+    py::array_t<double, py::array::c_style> py_x({ l, m });
+    auto mx = py_x.mutable_unchecked();
+
+    for (int i = 0; i < l; i++)
+    {
+        for (int j = 0; j < m; j++)
+        {
+            mx(i, j) = x[i][j];
+        }
+    }
+
+    return py_x;
+}
+
+py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<std::vector<double>>> x)
+{
+    int l = x.size();
+    int m = x[0].size();
+    int n = x[0][0].size();
+    py::array_t<double, py::array::c_style> py_x({ l, m, n });
+    auto mx = py_x.mutable_unchecked();
+
+    for (int i = 0; i < l; i++)
+    {
+        for (int j = 0; j < m; j++)
+        {
+            for (int k = 0; k < n; k++)
+            {
+                mx(i, j, k) = x[i][j][k];
+            }
+        }
+    }
+
+    return py_x;
+}
 
 namespace jdate
 {
@@ -47,7 +144,6 @@ namespace jdate
         return jd.get_time();
     }
 }
-
 
 namespace ephemeris
 {
@@ -232,7 +328,6 @@ namespace ephemeris
     }
 }
 
-
 namespace astrodynamics
 {
     py::tuple py_kepler(py::array_t<double> py_r0, py::array_t<double> py_v0, double t, double mu, std::optional<double> eps)
@@ -289,32 +384,6 @@ namespace astrodynamics
         return py::make_tuple(py_v0, py_v1);
     }
 
-    double* py_arr_ptr(py::object obj)
-    {
-        return static_cast<double*>(obj.cast<py::array_t<double>>().request().ptr);
-    }
-
-    int py_arr_size(py::object obj)
-    {
-        return obj.cast<py::array_t<double>>().request().size;
-    }
-
-    Spl py_spl(py::object obj)
-    {
-        py::tuple tup = obj;
-        Spl s = { py_arr_ptr(tup[0]), py_arr_ptr(tup[1]), py_arr_size(tup[0]), tup[2].cast<int>() };
-        return s;
-    }
-
-    Spl py_bspl(py::object obj) {
-        py::tuple tup = obj;
-        Spl s = {
-            py_arr_ptr(tup[0]), py_arr_ptr(tup[1]), py_arr_ptr(tup[2]),
-            py_arr_size(tup[0]), py_arr_size(tup[1]),
-            tup[3].cast<int>(), tup[4].cast<int>() };
-        return s;
-    }
-
     double splev(double x, py::object obj)
     {
         Spl s = py_spl(obj);
@@ -328,76 +397,8 @@ namespace astrodynamics
     }
 }
 
-
 namespace interplanetary
 {
-    template<typename T>
-    py::list py_copy_list(std::vector<T> x)
-    {
-        py::list py_list;
-
-        for (auto& v : x) py_list.append(v);
-
-        return py_list;
-    }
-
-    template<typename T>
-    py::array_t<T, py::array::c_style> py_copy_array(std::vector<T> x)
-    {
-        int l = x.size();
-
-        py::array_t<T, py::array::c_style> py_x({ l });
-        auto mx = py_x.mutable_unchecked();
-
-        for (int i = 0; i < l; i++)
-        {
-            mx(i) = x[i];
-        }
-
-        return py_x;
-    }
-
-    py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<double>> x)
-    {
-        int l = x.size();
-        int m = x[0].size();
-
-        py::array_t<double, py::array::c_style> py_x({ l, m });
-        auto mx = py_x.mutable_unchecked();
-
-        for (int i = 0; i < l; i++)
-        {
-            for (int j = 0; j < m; j++)
-            {
-                mx(i, j) = x[i][j];
-            }
-        }
-
-        return py_x;
-    }
-
-    py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<std::vector<double>>> x)
-    {
-        int l = x.size();
-        int m = x[0].size();
-        int n = x[0][0].size();
-        py::array_t<double, py::array::c_style> py_x({ l, m, n });
-        auto mx = py_x.mutable_unchecked();
-
-        for (int i = 0; i < l; i++)
-        {
-            for (int j = 0; j < m; j++)
-            {
-                for (int k = 0; k < n; k++)
-                {
-                    mx(i, j, k) = x[i][j][k];
-                }
-            }
-        }
-
-        return py_x;
-    }
-
     py::dict py_output_result(FlightPlan::Result result)
     {
         py::dict py_result;
@@ -754,51 +755,6 @@ namespace interplanetary
 
 namespace lunar
 {
-    template<typename T>
-    py::list py_copy_list(std::vector<T> x)
-    {
-        py::list py_list;
-
-        for (auto& v : x) py_list.append(v);
-
-        return py_list;
-    }
-
-    template<typename T>
-    py::array_t<T, py::array::c_style> py_copy_array(std::vector<T> x)
-    {
-        int l = x.size();
-
-        py::array_t<T, py::array::c_style> py_x({ l });
-        auto mx = py_x.mutable_unchecked();
-
-        for (int i = 0; i < l; i++)
-        {
-            mx(i) = x[i];
-        }
-
-        return py_x;
-    }
-
-    py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<double>> x)
-    {
-        int l = x.size();
-        int m = x[0].size();
-
-        py::array_t<double, py::array::c_style> py_x({ l, m });
-        auto mx = py_x.mutable_unchecked();
-
-        for (int i = 0; i < l; i++)
-        {
-            for (int j = 0; j < m; j++)
-            {
-                mx(i, j) = x[i][j];
-            }
-        }
-
-        return py_x;
-    }
-
     py::dict py_output_result(LunarFlightPlan::Result result)
     {
         py::dict py_result;
@@ -898,29 +854,7 @@ namespace kerbal_guidance_system
     // python interface functions
     const double pi = 3.14159265358979323846;
 
-    double* py_arr_ptr(py::object obj)
-    {
-        return static_cast<double*>(obj.cast<py::array_t<double>>().request().ptr);
-    }
-
-    int py_arr_size(py::object obj)
-    {
-        return obj.cast<py::array_t<double>>().request().size;
-    }
-
-    Eigen::Vector3d py_vector3d(py::object obj)
-    {
-        return Eigen::Map<Eigen::Vector3d>(py_arr_ptr(obj.cast<py::array_t<double>>()));
-    }
-
     // enums, structs, and init functions
-    Spl py_spl(py::object obj)
-    {
-        py::tuple tup = obj;
-        Spl s = { py_arr_ptr(tup[0]), py_arr_ptr(tup[1]), py_arr_size(tup[0]), tup[2].cast<int>() };
-        return s;
-    }
-
     enum class StageType
     {
         ConstThrust,
@@ -1243,127 +1177,8 @@ namespace kerbal_guidance_system
     }
 }
 
-
 namespace conic
 {
-    py::list test(
-        double gravitational_parameter,
-        double semi_major_axis,
-        double eccentricity,
-        double inclination,
-        double longitude_of_ascending_node,
-        double argument_of_periapsis,
-        double mean_anomaly_at_epoch,
-        double epoch,
-        py::list py_t)
-    {
-        Orbit orbit;
-
-        orbit = Orbit(
-            gravitational_parameter,
-            semi_major_axis,
-            eccentricity,
-            inclination,
-            longitude_of_ascending_node,
-            argument_of_periapsis,
-            mean_anomaly_at_epoch,
-            epoch);
-
-        py::list lst;
-
-        for (int i = 0; i < py_t.size(); i++)
-        {
-            double t = py_t[i].cast<double>();
-
-            py::list lst2;
-
-            Eigen::Vector3d r = orbit.get_position(t);
-            Eigen::Vector3d v = orbit.get_velocity(t);
-            Eigen::Vector3d a = orbit.get_acceleration(t);
-
-            lst2.append(r(0));
-            lst2.append(r(1));
-            lst2.append(r(2));
-            lst2.append(v(0));
-            lst2.append(v(1));
-            lst2.append(v(2));
-            lst2.append(a(0));
-            lst2.append(a(1));
-            lst2.append(a(2));
-
-            lst.append(lst2);
-        }
-
-        return lst;
-    }
-
-    template<typename T>
-    py::list py_copy_list(std::vector<T> x)
-    {
-        py::list py_list;
-
-        for (auto& v : x) py_list.append(v);
-
-        return py_list;
-    }
-
-    template<typename T>
-    py::array_t<T, py::array::c_style> py_copy_array(std::vector<T> x)
-    {
-        int l = x.size();
-
-        py::array_t<T, py::array::c_style> py_x({ l });
-        auto mx = py_x.mutable_unchecked();
-
-        for (int i = 0; i < l; i++)
-        {
-            mx(i) = x[i];
-        }
-
-        return py_x;
-    }
-
-    py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<double>> x)
-    {
-        int l = x.size();
-        int m = x[0].size();
-
-        py::array_t<double, py::array::c_style> py_x({ l, m });
-        auto mx = py_x.mutable_unchecked();
-
-        for (int i = 0; i < l; i++)
-        {
-            for (int j = 0; j < m; j++)
-            {
-                mx(i, j) = x[i][j];
-            }
-        }
-
-        return py_x;
-    }
-
-    py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<std::vector<double>>> x)
-    {
-        int l = x.size();
-        int m = x[0].size();
-        int n = x[0][0].size();
-        py::array_t<double, py::array::c_style> py_x({ l, m, n });
-        auto mx = py_x.mutable_unchecked();
-
-        for (int i = 0; i < l; i++)
-        {
-            for (int j = 0; j < m; j++)
-            {
-                for (int k = 0; k < n; k++)
-                {
-                    mx(i, j, k) = x[i][j][k];
-                }
-            }
-        }
-
-        return py_x;
-    }
-
     py::dict py_output_result(ConicLunarFlightPlan::Result result)
     {
         py::dict py_result;
@@ -1388,42 +1203,79 @@ namespace conic
         try
         {
             Orbit planet_orbit = Orbit(
-                1.1723328e18,		// gravitational_parameter
-                1.3599840256e10,	// semi_major_axis
-                0.0,				// eccentricity
-                0.0,				// inclination
-                0.0,				// longitude_of_ascending_node
-                0.0,				// argument_of_periapsis
-                3.14,				// mean_anomaly_at_epoch
-                0.0);				// epoch
+                py_p["planet"]["orbit"]["gravitational_parameter"].cast<double>(),		// gravitational_parameter
+                py_p["planet"]["orbit"]["semi_major_axis"].cast<double>(),         	    // semi_major_axis
+                py_p["planet"]["orbit"]["eccentricity"].cast<double>(),				    // eccentricity
+                py_p["planet"]["orbit"]["inclination"].cast<double>(),				    // inclination
+                py_p["planet"]["orbit"]["longitude_of_ascending_node"].cast<double>(),	// longitude_of_ascending_node
+                py_p["planet"]["orbit"]["argument_of_periapsis"].cast<double>(),		// argument_of_periapsis
+                py_p["planet"]["orbit"]["mean_anomaly_at_epoch"].cast<double>(),		// mean_anomaly_at_epoch
+                py_p["planet"]["orbit"]["epoch"].cast<double>()                         // epoch
+            );				       
 
             Orbit moon_orbit = Orbit(
-                3.5316e12,	// gravitational_parameter
-                1.2e7,		// semi_major_axis
-                0.0,		// eccentricity
-                0.0,		// inclination
-                0.0,		// longitude_of_ascending_node
-                0.0,		// argument_of_periapsis
-                1.7,		// mean_anomaly_at_epoch
-                0.0);		// epoch
+                py_p["moon"]["orbit"]["gravitational_parameter"].cast<double>(),		// gravitational_parameter
+                py_p["moon"]["orbit"]["semi_major_axis"].cast<double>(),         	    // semi_major_axis
+                py_p["moon"]["orbit"]["eccentricity"].cast<double>(),				    // eccentricity
+                py_p["moon"]["orbit"]["inclination"].cast<double>(),				    // inclination
+                py_p["moon"]["orbit"]["longitude_of_ascending_node"].cast<double>(),	// longitude_of_ascending_node
+                py_p["moon"]["orbit"]["argument_of_periapsis"].cast<double>(),		    // argument_of_periapsis
+                py_p["moon"]["orbit"]["mean_anomaly_at_epoch"].cast<double>(),		    // mean_anomaly_at_epoch
+                py_p["moon"]["orbit"]["epoch"].cast<double>()                           // epoch
+            );
 
-            astrodynamics::ConicBody moon = { &moon_orbit, 6.5138398e10, 2.4295591e6, 2.0e5 };
-            astrodynamics::ConicBody planet = { &planet_orbit, 3.5316e12, 8.4159287, 6.0e5 };
+            astrodynamics::ConicBody moon = { &moon_orbit, py_p["moon"]["gravitational_parameter"].cast<double>(), py_p["moon"]["soi"].cast<double>(), py_p["moon"]["radius"].cast<double>() };
+            astrodynamics::ConicBody planet = { &planet_orbit, py_p["planet"]["gravitational_parameter"].cast<double>(), py_p["planet"]["soi"].cast<double>(), py_p["planet"]["radius"].cast<double>() };
 
-            ConicLunarFlightPlan clfp(planet, moon);
-            clfp.set_mission(
-                py_p["initial_time"].cast<double>(), 
-                ConicLunarFlightPlan::TrajectoryMode::LEAVE, 
-                py_p["rp_planet"].cast<double>(), 
-                py_p["rp_moon"].cast<double>(), 
-                py_p["e_moon"].cast<double>());
+            ConicLunarFlightPlan flight_plan(planet, moon);
 
+            std::string py_mode = py_p["mode"].cast<std::string>();
 
-            clfp.init_model();
-            clfp.run_model(2000, 1e-8, 1e-8, 1e-8);
-            ConicLunarFlightPlan::Result res = clfp.output_result(1e-8);
+            ConicLunarFlightPlan::TrajectoryMode mode;
 
-            ConicLunarFlightPlan::Result result = clfp.output_result(py_p["eps"].cast<double>());
+            if (py_mode == "free_return")
+            {
+                mode = ConicLunarFlightPlan::TrajectoryMode::FREE_RETURN;
+            }
+            else if (py_mode == "leave")
+            {
+                mode = ConicLunarFlightPlan::TrajectoryMode::LEAVE;
+            }
+            else if (py_mode == "return")
+            {
+                mode = ConicLunarFlightPlan::TrajectoryMode::RETURN;
+            }
+
+            double initial_time(py_p["initial_time"].cast<double>());
+            double rp_planet = py_p["rp_planet"].cast<double>();
+            double rp_moon = py_p["rp_moon"].cast<double>();
+            double e_moon = py_p["e_moon"].cast<double>();
+
+            flight_plan.set_mission(initial_time, mode, rp_planet, rp_moon, e_moon);
+
+            if (!py_p["min_time"].is_none()) flight_plan.add_min_flight_time_constraint(py_p["min_time"].cast<double>());
+            if (!py_p["max_time"].is_none()) flight_plan.add_max_flight_time_constraint(py_p["max_time"].cast<double>());
+            if (!py_p["min_inclination_launch"].is_none() && !py_p["max_inclination_launch"].is_none() && !py_p["n_launch"].is_none())
+            {
+                py::array_t<double> py_n_launch = py_p["n_launch"];
+                Eigen::Vector3d n_launch = { py_n_launch.at(0), py_n_launch.at(1), py_n_launch.at(2) };
+                flight_plan.add_inclination_constraint(
+                    true, py_p["min_inclination_launch"].cast<double>(), py_p["max_inclination_launch"].cast<double>(), n_launch);
+            }
+
+            if (!py_p["min_inclination_arrival"].is_none() && !py_p["max_inclination_arrival"].is_none() && !py_p["n_arrival"].is_none())
+            {
+                py::array_t<double> py_n_arrival = py_p["n_arrival"];
+                Eigen::Vector3d n_arrival = { py_n_arrival.at(0), py_n_arrival.at(1), py_n_arrival.at(2) };
+                flight_plan.add_inclination_constraint(
+                    false, py_p["min_inclination_arrival"].cast<double>(), py_p["max_inclination_arrival"].cast<double>(), n_arrival);
+            }
+
+            flight_plan.init_model();
+
+            flight_plan.run_model(py_p["num_evals"].cast<int>(), py_p["eps"].cast<double>(), py_p["eps_t"].cast<double>(), py_p["eps_x"].cast<double>());
+
+            ConicLunarFlightPlan::Result result = flight_plan.output_result(py_p["eps"].cast<double>());
 
             return py_output_result(result);
         }

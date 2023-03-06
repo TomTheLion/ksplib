@@ -28,8 +28,6 @@ namespace astrodynamics
 {
     py::tuple py_kepler(py::array_t<double> py_r0, py::array_t<double> py_v0, double t, double mu, std::optional<double> eps);
     py::tuple py_lambert(py::array_t<double> py_r0, py::array_t<double> py_r1, double t, double mu, std::optional<double> eps, std::optional<double> d, std::optional<py::array_t<double>> py_n);
-    double splev(double x, py::object obj);
-    double bisplev(double x, double y, py::object obj);
 }
 
 namespace interplanetary
@@ -54,15 +52,5 @@ namespace kerbal_guidance_system
 
 namespace conic
 {
-    py::list test(
-        double gravitational_parameter,
-        double semi_major_axis,
-        double eccentricity,
-        double inclination,
-        double longitude_of_ascending_node,
-        double argument_of_periapsis,
-        double mean_anomaly_at_epoch,
-        double epoch,
-        py::list py_t);
     py::dict lunar(py::dict py_p);
 }

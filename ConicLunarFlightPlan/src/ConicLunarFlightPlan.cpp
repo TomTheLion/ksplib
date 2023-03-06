@@ -225,7 +225,7 @@ ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
 
     const double* x_ptr = x_.data();
 
-    auto output = [this, &result](Eigen::Vector3d r, Eigen::Vector3d v, double mu, int leg, double ti, double tf, bool moon)
+    auto output = [this, &result](Eigen::Vector3d r, Eigen::Vector3d v, double mu, int leg, double ti, double tf, double tref, bool moon)
     {
         int steps = 500;
 
@@ -239,7 +239,7 @@ ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
             Eigen::Vector3d rm = data_.moon->orbit->get_position(t);
             Eigen::Vector3d vm = data_.moon->orbit->get_velocity(t);
 
-            auto [rf, vf] = astrodynamics::kepler(r, v, dt, mu, data_.eps);
+            auto [rf, vf] = astrodynamics::kepler(r, v, t - tref, mu, data_.eps);
 
             if (moon)
             {
@@ -279,10 +279,10 @@ ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
             double dt2 = *x_ptr++;
             double dtsoi = astrodynamics::hyperbolic_orbit_time_at_distance(r1, v1, data_.moon->soi, data_.moon->mu);
 
-            output(r0, v0, data_.planet->mu, 0, t0, t0 + dt1 - dtsoi, false);
-            output(r1, v1, data_.moon->mu, 1, t0 + dt1, t0 + dt1 - dtsoi, true);
-            output(r1, v1, data_.moon->mu, 2, t0 + dt1, t0 + dt1 + dtsoi, true);
-            output(r2, v2, data_.planet->mu, 3, t0 + dt1 + dt2, t0 + dt1 + dtsoi, false);
+            output(r0, v0, data_.planet->mu, 0, t0, t0 + dt1 - dtsoi, t0, false);
+            output(r1, v1, data_.moon->mu, 1, t0 + dt1 - dtsoi, t0 + dt1, t0 + dt1, true);
+            output(r1, v1, data_.moon->mu, 2, t0 + dt1, t0 + dt1 + dtsoi, t0 + dt1, true);
+            output(r2, v2, data_.planet->mu, 3, t0 + dt1 + dtsoi, t0 + dt1 + dt2, t0 + dt1 + dt2, false);
             break;
         }
     case TrajectoryMode::LEAVE:
@@ -297,8 +297,8 @@ ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
             double dt = *x_ptr++;
             double dtsoi = astrodynamics::hyperbolic_orbit_time_at_distance(r1, v1, data_.moon->soi, data_.moon->mu);
 
-            output(r0, v0, data_.planet->mu, 0, t0, t0 + dt - dtsoi, false);
-            output(r1, v1, data_.moon->mu, 1, t0 + dt, t0 + dt - dtsoi, true);
+            output(r0, v0, data_.planet->mu, 0, t0, t0 + dt - dtsoi, t0, false);
+            output(r1, v1, data_.moon->mu, 1, t0 + dt - dtsoi, t0 + dt, t0 + dt, true);
 
             break;
         }
@@ -314,8 +314,8 @@ ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
             double dt = *x_ptr++;
             double dtsoi = astrodynamics::hyperbolic_orbit_time_at_distance(r0, v0, data_.moon->soi, data_.moon->mu);
 
-            output(r0, v0, data_.moon->mu, 0, t0, t0 + dtsoi, true);
-            output(r1, v1, data_.planet->mu, 1, t0 + dt, t0 + dtsoi, false);
+            output(r0, v0, data_.moon->mu, 0, t0, t0 + dtsoi, t0, true);
+            output(r1, v1, data_.planet->mu, 1, t0 + dtsoi, t0 + dt, t0 + dt, false);
             break;
         }
     }

@@ -20,8 +20,6 @@ PYBIND11_MODULE(ksplib, m) {
     py::module sm_astro = m.def_submodule("astro", "astrodynamics module");
     sm_astro.def("kepler", &astrodynamics::py_kepler, "r0"_a, "v0"_a, "t"_a, "mu"_a, "eps"_a = 1e-8);
     sm_astro.def("lambert", &astrodynamics::py_lambert, "r0"_a, "r1"_a, "t"_a, "mu"_a, "eps"_a = 1e-8, "d"_a = 1.0, "n"_a = py::none());
-    sm_astro.def("splev", &astrodynamics::splev, "x"_a, "tck"_a);
-    sm_astro.def("bisplev", &astrodynamics::bisplev, "x"_a, "y"_a, "tck"_a);
 
     // kerbal guidance system functions
     py::module_ sm_kgs = m.def_submodule("kgs", "kerbal guidance system module");
@@ -42,15 +40,5 @@ PYBIND11_MODULE(ksplib, m) {
 
     // conic functions
     py::module_ sm_conic = m.def_submodule("conic", "conic module");
-    sm_conic.def("test", &conic::test, 
-        "gravitational_parameter"_a,
-        "semi_major_axis"_a,
-        "eccentricity"_a,
-        "inclination"_a,
-        "longitude_of_ascending_node"_a,
-        "argument_of_periapsis"_a,
-        "mean_anomaly_at_epoch"_a,
-        "epoch"_a,
-        "py_t"_a);
     sm_conic.def("lunar", &conic::lunar, "params"_a);
 }
