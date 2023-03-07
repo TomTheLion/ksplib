@@ -90,15 +90,41 @@ void ConicLunarFlightPlan::init_model()
 
     Eigen::Vector3d r1, v1;
 
-    if (data_.mode == TrajectoryMode::RETURN && data_.n_launch.dot(n) > 0)
+    r1 = data_.rp_moon * rm.normalized();
+    v1 = -sqrt((1.0 + e_moon_) * mu_moon / data_.rp_moon) * rm.cross(n).normalized();
+
+    switch (data_.mode)
     {
-        v1 = -sqrt((1.0 + e_moon_) * mu_moon / data_.rp_moon) * rm;
-        r1 = data_.rp_moon * v1.cross(n).normalized();
-    }
-    else
-    {
-        r1 = data_.rp_moon * rm.normalized();
-        v1 = sqrt((1.0 + e_moon_) * mu_moon / data_.rp_moon) * rm.cross(n).normalized();
+    case TrajectoryMode::FREE_RETURN:
+        if (data_.min_inclination_launch < astrodynamics::pi / 2.0)
+        {
+            v1 *= -1.0;
+        }
+        else
+        {
+            v0 *= -1.0;
+        }
+        break;
+    case TrajectoryMode::LEAVE:
+        if (data_.min_inclination_launch > astrodynamics::pi / 2.0)
+        {
+            v0 *= -1.0;
+        }
+        if (data_.min_inclination_arrival > astrodynamics::pi / 2.0)
+        {
+            v1 *= -1.0;
+        }
+        break;
+    case TrajectoryMode::RETURN:
+        if (data_.min_inclination_launch > astrodynamics::pi / 2.0)
+        {
+            v1 *= -1.0;
+        }
+        if (data_.min_inclination_arrival > astrodynamics::pi / 2.0)
+        {
+            v0 *= -1.0;
+        }
+        break;
     }
 
     auto push_back_state = [](std::vector<double>& x, Eigen::Vector3d r, Eigen::Vector3d v, bool radius)
@@ -126,8 +152,8 @@ void ConicLunarFlightPlan::init_model()
         x_.push_back(0.0);
         x_.push_back(0.0);
         x_.push_back(0.0);
-        x_.push_back(0.0);
-        x_.push_back(0.0);
+        x_.push_back(2.0 * dt - data_.min_time);
+        x_.push_back(data_.max_time - 2.0 * dt);
     }
     else
     {
@@ -139,8 +165,8 @@ void ConicLunarFlightPlan::init_model()
         x_.push_back(0.0);
         x_.push_back(0.0);
         x_.push_back(0.0);
-        x_.push_back(0.0);
-        x_.push_back(0.0);
+        x_.push_back(dt - data_.min_time);
+        x_.push_back(data_.max_time - dt);
     }
 }
 
@@ -227,7 +253,7 @@ ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
 
     auto output = [this, &result](Eigen::Vector3d r, Eigen::Vector3d v, double mu, int leg, double ti, double tf, double tref, bool moon)
     {
-        int steps = 500;
+        int steps = 20;
 
         for (int i = 0; i <= steps; i++)
         {
@@ -239,7 +265,7 @@ ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
             Eigen::Vector3d rm = data_.moon->orbit->get_position(t);
             Eigen::Vector3d vm = data_.moon->orbit->get_velocity(t);
 
-            auto [rf, vf] = astrodynamics::kepler(r, v, t - tref, mu, data_.eps);
+            auto [rf, vf] = astrodynamics::kepler_s(r, v, t - tref, mu, data_.eps);
 
             if (moon)
             {
@@ -271,7 +297,7 @@ ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
 
             // parse inputs
             auto [r0, v0] = cartesian_state(x_ptr, data_.rp_planet);
-            auto [r1, v1] = cartesian_state(x_ptr, data_.rp_moon);
+            auto [r1, v1] = cartesian_state(x_ptr, 0.0);
             auto [r2, v2] = cartesian_state(x_ptr, data_.rp_planet);
 
             double t0 = data_.initial_time;
@@ -449,7 +475,7 @@ void ConicLunarFlightPlan::free_return_constraints(unsigned m, double* result, u
 
         // parse inputs
         auto [r0, v0] = cartesian_state(x_ptr, data->rp_planet);
-        auto [r1, v1] = cartesian_state(x_ptr, data->rp_moon);
+        auto [r1, v1] = cartesian_state(x_ptr, 0.0);
         auto [r2, v2] = cartesian_state(x_ptr, data->rp_planet);
 
         double t0 = data->initial_time;
@@ -469,8 +495,8 @@ void ConicLunarFlightPlan::free_return_constraints(unsigned m, double* result, u
         auto [r0f, v0f] = astrodynamics::kepler_s(r0, v0, dt1 - dtsoi, data->planet->mu, data->eps);
         auto [r1b, v1b] = astrodynamics::kepler_s(r1, v1, -dtsoi, data->moon->mu, data->eps);
 
-        auto [r1f, v1f] = astrodynamics::kepler_s(r1, v1, dtsoi, data->planet->mu, data->eps);
-        auto [r2b, v2b] = astrodynamics::kepler_s(r2, v2, dtsoi - dt2, data->moon->mu, data->eps);
+        auto [r1f, v1f] = astrodynamics::kepler_s(r1, v1, dtsoi, data->moon->mu, data->eps);
+        auto [r2b, v2b] = astrodynamics::kepler_s(r2, v2, dtsoi - dt2, data->planet->mu, data->eps);
 
         // calculate constraints
 

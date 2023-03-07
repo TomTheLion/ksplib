@@ -1273,7 +1273,10 @@ namespace conic
 
             flight_plan.init_model();
 
-            flight_plan.run_model(py_p["num_evals"].cast<int>(), py_p["eps"].cast<double>(), py_p["eps_t"].cast<double>(), py_p["eps_x"].cast<double>());
+            if (py_p["run_model"].cast<bool>())
+            {
+                flight_plan.run_model(py_p["num_evals"].cast<int>(), py_p["eps"].cast<double>(), py_p["eps_t"].cast<double>(), py_p["eps_x"].cast<double>());
+            }
 
             ConicLunarFlightPlan::Result result = flight_plan.output_result(py_p["eps"].cast<double>());
 

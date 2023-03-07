@@ -29,7 +29,7 @@ int main()
 		0.0);		// epoch
 
 	astrodynamics::ConicBody moon = { &moon_orbit, 6.5138398e10, 2.4295591e6, 2.0e5 };
-	astrodynamics::ConicBody planet = { &planet_orbit, 3.5316e12, 8.4159287, 6.0e5 };
+	astrodynamics::ConicBody planet = { &planet_orbit, 3.5316e12, 84159286.0, 6.0e5 };
 
 
 
@@ -38,7 +38,7 @@ int main()
 	// LunarFlightPlan lfp(eph);
 
 	ConicLunarFlightPlan clfp(planet, moon);
-	clfp.set_mission(0.0, ConicLunarFlightPlan::TrajectoryMode::LEAVE, 680000.0, 214000.0, 1.2);
+	clfp.set_mission(100000.0, ConicLunarFlightPlan::TrajectoryMode::FREE_RETURN, 680000.0, 214000.0, 1.2);
 
 
 
@@ -61,7 +61,7 @@ int main()
 		// LunarFlightPlan::Result res = lfp.output_result(1e-8);
 
 		clfp.init_model();
-		clfp.run_model(2000, 1e-8, 1e-8, 1e-8);
+		// clfp.run_model(2000, 1e-8, 1e-8, 1e-8);
 		ConicLunarFlightPlan::Result res = clfp.output_result(1e-8);
 
 		double minc = 0.0;
