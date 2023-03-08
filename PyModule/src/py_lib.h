@@ -53,4 +53,5 @@ namespace kerbal_guidance_system
 namespace conic
 {
     py::dict lunar(py::dict py_p);
+    py::array_t<double> relative_state(py::dict py_p);
 }

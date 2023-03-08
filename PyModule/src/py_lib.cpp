@@ -1288,4 +1288,373 @@ namespace conic
             return py::dict();
         }
     }
+
+    Orbit craft_orbit;
+    Orbit moon_orbit;
+    double soi = 0.0;
+
+    double myfunc(unsigned n, const double* x, double* grad, void* my_func_data)
+    {
+        Eigen::Vector3d rc = craft_orbit.get_position(x[0]);
+        Eigen::Vector3d rm = moon_orbit.get_position(x[0]);
+
+
+        return (rc - rm).norm() - soi;
+    }
+
+    py::array_t<double> relative_state(py::dict py_p)
+    {
+        py::array_t<double> output({ 100, 2 });
+        double* output_ptr = py_arr_ptr(output);
+
+        craft_orbit = Orbit(
+            py_p["craft"]["orbit"]["gravitational_parameter"].cast<double>(),		// gravitational_parameter
+            py_p["craft"]["orbit"]["semi_major_axis"].cast<double>(),         	    // semi_major_axis
+            py_p["craft"]["orbit"]["eccentricity"].cast<double>(),				    // eccentricity
+            py_p["craft"]["orbit"]["inclination"].cast<double>(),				    // inclination
+            py_p["craft"]["orbit"]["longitude_of_ascending_node"].cast<double>(),	// longitude_of_ascending_node
+            py_p["craft"]["orbit"]["argument_of_periapsis"].cast<double>(),		    // argument_of_periapsis
+            py_p["craft"]["orbit"]["mean_anomaly_at_epoch"].cast<double>(),		    // mean_anomaly_at_epoch
+            py_p["craft"]["orbit"]["epoch"].cast<double>()                          // epoch
+        );
+
+        moon_orbit = Orbit(
+            py_p["moon"]["orbit"]["gravitational_parameter"].cast<double>(),		// gravitational_parameter
+            py_p["moon"]["orbit"]["semi_major_axis"].cast<double>(),         	    // semi_major_axis
+            py_p["moon"]["orbit"]["eccentricity"].cast<double>(),				    // eccentricity
+            py_p["moon"]["orbit"]["inclination"].cast<double>(),				    // inclination
+            py_p["moon"]["orbit"]["longitude_of_ascending_node"].cast<double>(),	// longitude_of_ascending_node
+            py_p["moon"]["orbit"]["argument_of_periapsis"].cast<double>(),		    // argument_of_periapsis
+            py_p["moon"]["orbit"]["mean_anomaly_at_epoch"].cast<double>(),		    // mean_anomaly_at_epoch
+            py_p["moon"]["orbit"]["epoch"].cast<double>()                           // epoch
+        );
+
+        double t0 = py_p["initial_time"].cast<double>();
+        double dt = astrodynamics::tau * craft_orbit.get_time_scale() / 100.0;
+        
+
+        for (int i = 0; i < 100; i++)
+        {
+            double t = t0 + dt * i;
+            Eigen::Vector3d rc = craft_orbit.get_position(t);
+            Eigen::Vector3d vc = craft_orbit.get_velocity(t);
+            Eigen::Vector3d rm = moon_orbit.get_position(t);
+            Eigen::Vector3d vm = moon_orbit.get_velocity(t);
+
+            double dr = (rc - rm).norm();
+            double dv = (vc - vm).norm();
+
+            output_ptr[2 * i + 0] = t;
+            output_ptr[2 * i + 1] = dr;
+        }
+
+        nlopt::opt opt(nlopt::LN_BOBYQA, 1);
+
+        std::vector<double> lb(1);
+        std::vector<double> ub(1);
+        lb[0] = t0; 
+        ub[0] = t0 + 100.0 * dt;
+        opt.set_lower_bounds(lb);
+        opt.set_upper_bounds(ub);
+        opt.set_min_objective(myfunc, NULL);
+
+        opt.set_xtol_rel(1e-4);
+        std::vector<double> x(1);
+        std::vector<double> x1(1);
+        x[0] = t0 + 50.0 * dt;
+        double minf;
+
+        try {
+            nlopt::result result = opt.optimize(x, minf);
+            std::cout << "found minimum at f(" << x[0] << ") = "
+                << std::setprecision(10) << minf << std::endl;
+            std::cout << "num evals: " << opt.get_numevals() << std::endl;
+        }
+        catch (std::exception& e) {
+            std::cout << "nlopt failed: " << e.what() << std::endl;
+        }
+
+        soi = py_p["moon"]["soi"].cast<double>();
+
+        std::cout << soi - minf << '\n';
+
+        if (minf < soi)
+        { 
+            ub[0] = x[0];
+            x[0] = (t0 + x[0]) / 2.0;
+            int num_evals = 0;
+            double f;
+
+            for (int i = 0; i < 20; i++)
+            {
+                num_evals++;
+                f = myfunc(1, x.data(), NULL, NULL);
+                x1[0] = x[0] + 1e-4;
+                double f1 = myfunc(1, x1.data(), NULL, NULL);
+
+                double xnew = x[0] - 1e-4 * f / (f1 - f);
+
+                if (xnew > ub[0])
+                {
+                    x[0] = (x[0] + ub[0]) / 2.0;
+                    std::cout << xnew << " ub\n";
+                }
+                else if (xnew < lb[0])
+                {
+                    x[0] = (x[0] + lb[0]) / 2.0;
+                    std::cout << xnew << " lb\n";
+                }
+                else
+                {
+                    x[0] = xnew;
+                }
+
+                if (abs(f) < 1e-8)
+                {
+                    break;
+                }
+
+                std::cout << std::setprecision(17) << "x = " << x[0] << " f = " << f << " f1 = " << f1 << '\n';
+            }
+
+            std::cout << "found minimum at f(" << x[0] << ") = "
+                << std::setprecision(10) << f << std::endl;
+            std::cout << "num evals: " << num_evals << std::endl;
+        }
+
+
+        return output;
+    }
+
+    /*std::tuple<Eigen::Vector3d, Eigen::Vector3d> kepler(Eigen::Vector3d r0, Eigen::Vector3d v0, double t, double mu, double eps)
+    {
+
+    }
+
+    struct TCMData
+    {
+        int bref;
+        std::vector<double> t;
+        std::vector<double> yi;
+        astrodynamics::NBodyParams n_body_params;
+        std::vector<double> xf;
+    };
+
+    void constraints_tcm(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data)
+    {
+        TCMData* data = reinterpret_cast<TCMData*>(f_data);
+
+        std::vector<Eigen::Matrix<double, 6, 6>> stms(data->t.size());
+
+        Equation equation = Equation(astrodynamics::n_body_df_vessel, data->yi.size(), data->yi.data(), data->t[0], 1e-12, 1e-12, &data->n_body_params);
+
+        for (int i = 0; i < data->t.size() - 1; i++)
+        {
+            double t0 = data->t[i];
+            double t1 = data->t[i + 1];
+            equation.step(t1);
+            equation.get_y(6, 36, stms[i].data());
+            equation.set_ti(t1);
+            equation.set_yi(0, equation.get_y(0));
+            equation.set_yi(1, equation.get_y(1));
+            equation.set_yi(2, equation.get_y(2));
+            equation.set_yi(3, equation.get_y(3) + x[3 * i + 0]);
+            equation.set_yi(4, equation.get_y(4) + x[3 * i + 1]);
+            equation.set_yi(5, equation.get_y(5) + x[3 * i + 2]);
+
+            for (int j = 42; j < equation.get_neqn(); j++)
+            {
+                equation.set_yi(j, equation.get_y(j));
+            }
+            equation.reset();
+        }
+        equation.get_y(6, 36, stms.back().data());
+
+        for (int i = 0; i < 6; i++)
+        {
+            result[i] = equation.get_y(i) - data->xf[i];
+            if (data->bref > -1)
+            {
+                result[i] -= equation.get_y(42 + 6 * data->bref + i);
+            }
+        }
+
+        if (grad)
+        {
+            Eigen::MatrixXd mgrad(m, n);
+            for (int i = 1; i < data->t.size(); i++)
+            {
+                Eigen::Matrix<double, 6, 6> stm = stms[i];
+                for (int j = i + 1; j < stms.size(); j++)
+                {
+                    stm = stms[j] * stm;
+                }
+                mgrad.block<6, 3>(0, 3 * (i - 1)) = stm.block<6, 3>(0, 3);
+            }
+
+            for (int j = 0; j < m; j++)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    grad[j * n + i] = mgrad(j, i);
+                }
+            }
+        }
+    }
+
+    double objective_tcm(unsigned n, const double* x, double* grad, void* f_data)
+    {
+        TCMData* data = reinterpret_cast<TCMData*>(f_data);
+
+        int b = 0;
+        if (data->bref == -1)
+        {
+            b = 1;
+        }
+
+        double f = 0.0;
+        for (int i = 0; i < n / 3 - b; i++)
+        {
+            f += sqrt(
+                x[3 * i + 0] * x[3 * i + 0] +
+                x[3 * i + 1] * x[3 * i + 1] +
+                x[3 * i + 2] * x[3 * i + 2]
+            );
+        }
+
+        if (grad)
+        {
+            for (int i = 0; i < n / 3; i++)
+            {
+                double dv = sqrt(
+                    x[3 * i + 0] * x[3 * i + 0] +
+                    x[3 * i + 1] * x[3 * i + 1] +
+                    x[3 * i + 2] * x[3 * i + 2]
+                );
+
+                grad[3 * i + 0] = x[3 * i + 0] / dv;
+                grad[3 * i + 1] = x[3 * i + 1] / dv;
+                grad[3 * i + 2] = x[3 * i + 2] / dv;
+            }
+        }
+
+        return f;
+    }
+
+    py::tuple trajectory_correction(py::array_t<double> py_r, py::array_t<double> py_v, py::array_t<double> py_rt, py::array_t<double> py_vt, py::array_t<double> py_t, int bref, py::tuple py_body_info)
+    {
+        try
+        {
+            py::list py_bodies = py_body_info[1];
+            int num_bodies = py_bodies.size();
+            std::vector<double> mu;
+
+            for (int i = 0; i < num_bodies; i++)
+            {
+                py::list py_body = py_bodies[i];
+                mu.push_back(py_body[1].cast<double>());
+            }
+
+            TCMData tcm_data;
+
+            tcm_data.bref = bref;
+            tcm_data.n_body_params.num_bodies = num_bodies;
+            tcm_data.n_body_params.muk = py_body_info[0].cast<double>();
+            tcm_data.n_body_params.mu = mu;
+            tcm_data.yi.resize(42 + 6 * num_bodies, 0.0);
+
+            for (int i = 0; i < py_t.size(); i++)
+            {
+                tcm_data.t.push_back(py_t.at(i));
+            }
+
+            for (int i = 0; i < 3; i++)
+            {
+                tcm_data.xf.push_back(py_rt.at(i));
+            }
+            for (int i = 0; i < 3; i++)
+            {
+                tcm_data.xf.push_back(py_vt.at(i));
+            }
+
+            for (int i = 0; i < 3; i++)
+            {
+                tcm_data.yi[i] = py_r.at(i);
+                tcm_data.yi[i + 3] = py_v.at(i);
+            }
+
+            std::vector<double> stmi = {
+                1, 0, 0, 0, 0, 0,
+                0, 1, 0, 0, 0, 0,
+                0, 0, 1, 0, 0, 0,
+                0, 0, 0, 1, 0, 0,
+                0, 0, 0, 0, 1, 0,
+                0, 0, 0, 0, 0, 1
+            };
+
+            for (int i = 0; i < 36; i++)
+            {
+                tcm_data.yi[6 + i] = stmi[i];
+            }
+
+            for (int i = 0; i < num_bodies; i++)
+            {
+                py::list py_body = py_bodies[i];
+                py::tuple r = py_body[2];
+                py::tuple v = py_body[3];
+
+                for (int j = 0; j < 6; j++)
+                {
+                    if (j < 3)
+                    {
+                        tcm_data.yi[42 + 6 * i + j] = r[j].cast<double>();
+                    }
+                    else
+                    {
+                        tcm_data.yi[42 + 6 * i + j] = v[j - 3].cast<double>();
+                    }
+                }
+            }
+
+            int m = 6;
+            int n = (tcm_data.t.size() - 1) * 3;
+            std::vector<double> x0(n, 1e-3);
+
+            std::vector<double> tol{ 5.7735e2, 5.7735e2, 5.7735e2, 5.7735e-4, 5.7735e-4, 5.7735e-4 };
+            double minf;
+
+            nlopt::opt opt = nlopt::opt("LD_SLSQP", n);
+            opt.set_min_objective(objective_tcm, &tcm_data);
+            opt.add_equality_mconstraint(constraints_tcm, &tcm_data, tol);
+            opt.set_ftol_abs(1e-4);
+            opt.optimize(x0, minf);
+
+            std::cout << std::setprecision(17);
+            std::cout << "last optimum value: " << opt.last_optimum_value() << '\n';
+            std::cout << "last optimum result: " << opt.last_optimize_result() << '\n';
+            std::cout << "num evals: " << opt.get_numevals() << '\n';
+
+            std::vector<double> result(6);
+
+            constraints_tcm(m, result.data(), n, x0.data(), NULL, &tcm_data);
+
+            py::list py_list_x0;
+
+            for (int i = 0; i < x0.size() / 3; i++)
+            {
+                py::array_t<double> dv(3);
+                auto mdv = dv.mutable_unchecked();
+                mdv(0) = x0[3 * i + 0];
+                mdv(1) = x0[3 * i + 1];
+                mdv(2) = x0[3 * i + 2];
+                py_list_x0.append(dv);
+            }
+
+            return py_list_x0;
+        }
+        catch (std::exception& e)
+        {
+            std::cerr << e.what() << "\n";
+        }
+    }*/
 }
