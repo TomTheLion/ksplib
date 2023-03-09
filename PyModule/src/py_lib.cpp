@@ -1426,79 +1426,89 @@ namespace conic
         return output;
     }
 
-    /*std::tuple<Eigen::Vector3d, Eigen::Vector3d> kepler(Eigen::Vector3d r0, Eigen::Vector3d v0, double t, double mu, double eps)
+    std::tuple<Eigen::Vector3d, Eigen::Vector3d> kepler(Eigen::Vector3d r0, Eigen::Vector3d v0, double t, double mu, double eps)
     {
 
     }
 
+    // create different correction functions for within and outside of soi...
+
     struct TCMData
     {
-        int bref;
+        astrodynamics::ConicBody* moon;
+        astrodynamics::ConicBody* planet;
         std::vector<double> t;
-        std::vector<double> yi;
-        astrodynamics::NBodyParams n_body_params;
-        std::vector<double> xf;
+        Eigen::Vector3d r0;
+        Eigen::Vector3d v0;
+        Eigen::Vector3d rf;
+        Eigen::Vector3d vf;
+        double eps;
     };
 
     void constraints_tcm(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data)
     {
         TCMData* data = reinterpret_cast<TCMData*>(f_data);
 
-        std::vector<Eigen::Matrix<double, 6, 6>> stms(data->t.size());
+        Eigen::Vector3d rp = data->r0;
+        Eigen::Vector3d vp = data->v0;
+        Eigen::Vector3d rm = data->rf;
+        Eigen::Vector3d vm = data->vf;
 
-        Equation equation = Equation(astrodynamics::n_body_df_vessel, data->yi.size(), data->yi.data(), data->t[0], 1e-12, 1e-12, &data->n_body_params);
+        double tsoi;
 
-        for (int i = 0; i < data->t.size() - 1; i++)
+        // within moon soi
+        for (int i = data->t.size() - 1; i > 0; i--)
+        {
+            vm(0) -= x[3 * (i - 1) + 0];
+            vm(1) -= x[3 * (i - 1) + 1];
+            vm(2) -= x[3 * (i - 1) + 2];
+
+            double t0 = data->t[i - 1];
+            double t1 = data->t[i];
+            double dtsoi = astrodynamics::hyperbolic_orbit_time_at_distance(rm, vm, data->moon->soi, data->moon->mu) - astrodynamics::hyperbolic_orbit_time_at_distance(rm, vm, rm.norm(), data->moon->mu);
+
+            if (t1 - t0 > dtsoi)
+            {
+                tsoi = t1 - dtsoi;
+                std::tie(rm, vm) = astrodynamics::kepler_s(rm, vm, tsoi - t1, data->moon->mu, data->eps);
+                break;
+            }
+
+            std::tie(rm, vm) = astrodynamics::kepler_s(rm, vm, t0 - t1, data->moon->mu, data->eps);
+        }
+
+        // within planet soi
+        for (int i = 0; i < data->t.size(); i++)
         {
             double t0 = data->t[i];
             double t1 = data->t[i + 1];
-            equation.step(t1);
-            equation.get_y(6, 36, stms[i].data());
-            equation.set_ti(t1);
-            equation.set_yi(0, equation.get_y(0));
-            equation.set_yi(1, equation.get_y(1));
-            equation.set_yi(2, equation.get_y(2));
-            equation.set_yi(3, equation.get_y(3) + x[3 * i + 0]);
-            equation.set_yi(4, equation.get_y(4) + x[3 * i + 1]);
-            equation.set_yi(5, equation.get_y(5) + x[3 * i + 2]);
 
-            for (int j = 42; j < equation.get_neqn(); j++)
+            if (t1 > tsoi)
             {
-                equation.set_yi(j, equation.get_y(j));
+                t1 = tsoi;
+                std::tie(rp, vp) = astrodynamics::kepler_s(rp, vp, tsoi - t0, data->planet->mu, data->eps);
+                break;
             }
-            equation.reset();
-        }
-        equation.get_y(6, 36, stms.back().data());
 
-        for (int i = 0; i < 6; i++)
-        {
-            result[i] = equation.get_y(i) - data->xf[i];
-            if (data->bref > -1)
-            {
-                result[i] -= equation.get_y(42 + 6 * data->bref + i);
-            }
+            std::tie(rp, vp) = astrodynamics::kepler_s(rp, vp, t1 - t0, data->planet->mu, data->eps);
+            vm(0) += x[3 * i + 0];
+            vm(1) += x[3 * i + 1];
+            vm(2) += x[3 * i + 2];
         }
+
+        Eigen::Vector3d dr = rp - (rm + data->moon->orbit->get_position(tsoi));
+        Eigen::Vector3d dv = vp - (vm + data->moon->orbit->get_velocity(tsoi));
+
+        result[0] = dr(0) / data->moon->orbit->get_distance_scale();
+        result[1] = dr(1) / data->moon->orbit->get_distance_scale();
+        result[2] = dr(2) / data->moon->orbit->get_distance_scale();
+        result[3] = dv(0) / data->moon->orbit->get_velocity_scale();
+        result[4] = dv(1) / data->moon->orbit->get_velocity_scale();
+        result[5] = dv(2) / data->moon->orbit->get_velocity_scale();
 
         if (grad)
         {
-            Eigen::MatrixXd mgrad(m, n);
-            for (int i = 1; i < data->t.size(); i++)
-            {
-                Eigen::Matrix<double, 6, 6> stm = stms[i];
-                for (int j = i + 1; j < stms.size(); j++)
-                {
-                    stm = stms[j] * stm;
-                }
-                mgrad.block<6, 3>(0, 3 * (i - 1)) = stm.block<6, 3>(0, 3);
-            }
-
-            for (int j = 0; j < m; j++)
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    grad[j * n + i] = mgrad(j, i);
-                }
-            }
+            constraint_numerical_gradient(m, n, x, grad, f_data, constraints_tcm);
         }
     }
 
@@ -1656,5 +1666,67 @@ namespace conic
         {
             std::cerr << e.what() << "\n";
         }
-    }*/
+    }
+
+    void constraint_numerical_gradient(unsigned m, unsigned n, const double* x, double* grad, void* f_data,
+        void(*func)(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data))
+    {
+        double eps = 1.49011611938476e-08;
+        std::vector<double> base(m);
+        std::vector<double> pert(m);
+        std::vector<double> p(n);
+
+        for (int i = 0; i < n; i++)
+        {
+            p[i] = x[i];
+        }
+
+        func(m, base.data(), n, x, NULL, f_data);
+
+        double pold;
+
+        for (int i = 0; i < n; i++)
+        {
+            if (i != 0)
+            {
+                p[i - 1] = pold;
+            }
+            pold = p[i];
+            p[i] += eps;
+
+            func(m, pert.data(), n, p.data(), NULL, f_data);
+
+            for (int j = 0; j < m; j++)
+            {
+                grad[i + j * n] = (pert[j] - base[j]) / eps;
+            }
+        }
+    }
+
+    void objective_numerical_gradient(unsigned n, const double* x, double* grad,
+        void* f_data, double(*func)(unsigned n, const double* x, double* grad, void* f_data))
+    {
+        double eps = 1.49011611938476e-08;
+        double base = func(n, x, NULL, f_data);
+        std::vector<double> p(n);
+
+        for (int i = 0; i < n; i++)
+        {
+            p[i] = x[i];
+        }
+
+        double pold;
+
+        for (int i = 0; i < n; i++)
+        {
+            if (i != 0)
+            {
+                p[i - 1] = pold;
+            }
+            pold = p[i];
+            p[i] += eps;
+
+            grad[i] = (func(n, p.data(), NULL, f_data) - base) / eps;
+        }
+    }
 }
