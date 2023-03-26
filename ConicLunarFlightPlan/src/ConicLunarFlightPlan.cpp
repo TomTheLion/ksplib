@@ -16,7 +16,9 @@ ConicLunarFlightPlan::ConicLunarFlightPlan(astrodynamics::ConicBody& planet, ast
     data_.max_time = 1e6;
     data_.min_inclination_launch = 0.0;
     data_.max_inclination_launch = astrodynamics::pi;
+    data_.n_launch_direction = 1.0;
     data_.n_launch = -Eigen::Vector3d::UnitY();
+    data_.n_launch_plane = -Eigen::Vector3d::UnitY();
     data_.min_inclination_arrival = 0.0;
     data_.max_inclination_arrival = astrodynamics::pi;
     data_.n_arrival = -Eigen::Vector3d::UnitY();
@@ -66,6 +68,12 @@ void ConicLunarFlightPlan::add_inclination_constraint(bool launch, double min, d
     }
 }
 
+void ConicLunarFlightPlan::add_launch_plane_constraint(double direction, Eigen::Vector3d n)
+{
+    data_.n_launch_direction = direction;
+    data_.n_launch_plane = n;
+}
+
 void ConicLunarFlightPlan::init_model()
 {
     double mu_planet = data_.planet->mu;
@@ -92,6 +100,8 @@ void ConicLunarFlightPlan::init_model()
 
     r1 = data_.rp_moon * rm.normalized();
     v1 = -sqrt((1.0 + e_moon_) * mu_moon / data_.rp_moon) * rm.cross(n).normalized();
+
+    v0 = Eigen::AngleAxisd(data_.n_launch_direction * data_.min_inclination_launch, rm.normalized()) * v0;
 
     switch (data_.mode)
     {
@@ -152,6 +162,7 @@ void ConicLunarFlightPlan::init_model()
         x_.push_back(0.0);
         x_.push_back(0.0);
         x_.push_back(0.0);
+        x_.push_back(0.0);
         x_.push_back(2.0 * dt - data_.min_time);
         x_.push_back(data_.max_time - 2.0 * dt);
     }
@@ -165,6 +176,7 @@ void ConicLunarFlightPlan::init_model()
         x_.push_back(0.0);
         x_.push_back(0.0);
         x_.push_back(0.0);
+        x_.push_back(0.0);
         x_.push_back(dt - data_.min_time);
         x_.push_back(data_.max_time - dt);
     }
@@ -173,8 +185,8 @@ void ConicLunarFlightPlan::init_model()
 void ConicLunarFlightPlan::run_model(int max_eval, double eps, double eps_t, double eps_x)
 {
     // calculate number of constraints and decision variables
-    int n = 17;
-    int m = 14;
+    int n = 18;
+    int m = 15;
 
     if (data_.mode == TrajectoryMode::FREE_RETURN)
     {
@@ -215,12 +227,18 @@ void ConicLunarFlightPlan::run_model(int max_eval, double eps, double eps_t, dou
     opt_.optimize(x_, minf);
 }
 
+// set conic solution
+void ConicLunarFlightPlan::set_solution(std::vector<double> x)
+{
+    x_ = x;
+}
+
 ConicLunarFlightPlan::Result ConicLunarFlightPlan::output_result(double eps)
 {
     Result result;
 
-    int n = 17;
-    int m = 14;
+    int n = 18;
+    int m = 15;
 
     if (data_.mode == TrajectoryMode::FREE_RETURN)
     {
@@ -403,6 +421,8 @@ std::tuple<std::vector<double>, std::vector<double>> ConicLunarFlightPlan::bound
         lower_bounds.push_back(0.0);
         lower_bounds.push_back(0.0);
         lower_bounds.push_back(0.0);
+        lower_bounds.push_back(0.0);
+        upper_bounds.push_back(HUGE_VAL);
         upper_bounds.push_back(HUGE_VAL);
         upper_bounds.push_back(HUGE_VAL);
         upper_bounds.push_back(HUGE_VAL);
@@ -424,6 +444,8 @@ std::tuple<std::vector<double>, std::vector<double>> ConicLunarFlightPlan::bound
         lower_bounds.push_back(0.0);
         lower_bounds.push_back(0.0);
         lower_bounds.push_back(0.0);
+        lower_bounds.push_back(0.0);
+        upper_bounds.push_back(HUGE_VAL);
         upper_bounds.push_back(HUGE_VAL);
         upper_bounds.push_back(HUGE_VAL);
         upper_bounds.push_back(HUGE_VAL);
@@ -484,6 +506,7 @@ void ConicLunarFlightPlan::free_return_constraints(unsigned m, double* result, u
 
         double min_launch_inc_slack = *x_ptr++;
         double max_launch_inc_slack = *x_ptr++;
+        double launch_plane_slack = *x_ptr++;
         double min_arrival_inc_slack = *x_ptr++;
         double max_arrival_inc_slack = *x_ptr++;
         double min_time_slack = *x_ptr++;
@@ -552,6 +575,8 @@ void ConicLunarFlightPlan::free_return_constraints(unsigned m, double* result, u
         *result_ptr++ = cosi_launch - cos(data->min_inclination_launch) + min_launch_inc_slack;
         *result_ptr++ = cosi_launch - cos(data->max_inclination_launch) - max_launch_inc_slack;
 
+        *result_ptr++ = -data->n_launch_plane.dot(v0.normalized()) * data->n_launch_direction - launch_plane_slack;
+
         *result_ptr++ = cosi_arrival - cos(data->min_inclination_arrival) + min_arrival_inc_slack;
         *result_ptr++ = cosi_arrival - cos(data->max_inclination_arrival) - max_arrival_inc_slack;
 
@@ -591,6 +616,7 @@ void ConicLunarFlightPlan::leave_constraints(unsigned m, double* result, unsigne
         
         double min_launch_inc_slack = *x_ptr++;
         double max_launch_inc_slack = *x_ptr++;
+        double launch_plane_slack = *x_ptr++;
         double min_arrival_inc_slack = *x_ptr++;
         double max_arrival_inc_slack = *x_ptr++;
         double min_time_slack = *x_ptr++;
@@ -642,6 +668,8 @@ void ConicLunarFlightPlan::leave_constraints(unsigned m, double* result, unsigne
         *result_ptr++ = cosi_launch - cos(data->min_inclination_launch) + min_launch_inc_slack;
         *result_ptr++ = cosi_launch - cos(data->max_inclination_launch) - max_launch_inc_slack;
 
+        *result_ptr++ = -data->n_launch_plane.dot(v0.normalized()) * data->n_launch_direction - launch_plane_slack;
+
         *result_ptr++ = cosi_arrival - cos(data->min_inclination_arrival) + min_arrival_inc_slack;
         *result_ptr++ = cosi_arrival - cos(data->max_inclination_arrival) - max_arrival_inc_slack;
 
@@ -681,6 +709,7 @@ void ConicLunarFlightPlan::return_constraints(unsigned m, double* result, unsign
 
         double min_launch_inc_slack = *x_ptr++;
         double max_launch_inc_slack = *x_ptr++;
+        double launch_plane_slack = *x_ptr++;
         double min_arrival_inc_slack = *x_ptr++;
         double max_arrival_inc_slack = *x_ptr++;
         double min_time_slack = *x_ptr++;
@@ -731,6 +760,8 @@ void ConicLunarFlightPlan::return_constraints(unsigned m, double* result, unsign
 
         *result_ptr++ = cosi_launch - cos(data->min_inclination_launch) + min_launch_inc_slack;
         *result_ptr++ = cosi_launch - cos(data->max_inclination_launch) - max_launch_inc_slack;
+
+        *result_ptr++ = -data->n_launch_plane.dot(v0.normalized()) * data->n_launch_direction - launch_plane_slack;
 
         *result_ptr++ = cosi_arrival - cos(data->min_inclination_arrival) + min_arrival_inc_slack;
         *result_ptr++ = cosi_arrival - cos(data->max_inclination_arrival) - max_arrival_inc_slack;

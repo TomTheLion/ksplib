@@ -54,4 +54,5 @@ namespace conic
 {
     py::dict lunar(py::dict py_p);
     py::array_t<double> relative_state(py::dict py_p);
+    py::tuple trajectory_correction(py::array_t<double> py_r, py::array_t<double> py_v, py::array_t<double> py_rt, py::array_t<double> py_vt, py::array_t<double> py_t, py::dict py_p);
 }

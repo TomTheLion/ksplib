@@ -42,4 +42,5 @@ PYBIND11_MODULE(ksplib, m) {
     py::module_ sm_conic = m.def_submodule("conic", "conic module");
     sm_conic.def("lunar", &conic::lunar, "params"_a);
     sm_conic.def("relative_state", &conic::relative_state, "params"_a);
+    sm_conic.def("trajectory_correction", &conic::trajectory_correction, "r0"_a, "v0"_a, "rf"_a, "vf"_a, "t"_a, "p"_a);
 }

@@ -21,6 +21,9 @@ include_directories(FlightPlan/src)
 include_directories(LunarFlightPlan/src)
 include_directories(ConicLunarFlightPlan/src)
 
+include_directories(PyModule/src)
+
+
 include_directories(testing/src)
 
 add_executable(

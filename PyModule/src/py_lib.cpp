@@ -384,17 +384,17 @@ namespace astrodynamics
         return py::make_tuple(py_v0, py_v1);
     }
 
-    double splev(double x, py::object obj)
-    {
-        Spl s = py_spl(obj);
-        return s.eval(x);
-    }
+    //double splev(double x, py::object obj)
+    //{
+    //    Spl s = py_spl(obj);
+    //    return s.eval(x);
+    //}
 
-    double bisplev(double x, double y, py::object obj)
-    {
-        Spl s = py_bspl(obj);
-        return s.eval(x, y);
-    }
+    //double bisplev(double x, double y, py::object obj)
+    //{
+    //    Spl s = py_bspl(obj);
+    //    return s.eval(x, y);
+    //}
 }
 
 namespace interplanetary
@@ -1271,11 +1271,37 @@ namespace conic
                     false, py_p["min_inclination_arrival"].cast<double>(), py_p["max_inclination_arrival"].cast<double>(), n_arrival);
             }
 
+            if (!py_p["n_launch_direction"].is_none() && !py_p["n_launch_plane"].is_none())
+            {
+                py::array_t<double> py_n_launch_plane = py_p["n_launch_plane"];
+                Eigen::Vector3d n_launch_plane = { py_n_launch_plane.at(0), py_n_launch_plane.at(1), py_n_launch_plane.at(2) };
+                flight_plan.add_launch_plane_constraint(
+                    py_p["n_launch_direction"].cast<double>(), n_launch_plane);
+            }
+
             flight_plan.init_model();
 
-            if (py_p["run_model"].cast<bool>())
+            if (!py_p["conic_solution"].is_none())
             {
-                flight_plan.run_model(py_p["num_evals"].cast<int>(), py_p["eps"].cast<double>(), py_p["eps_t"].cast<double>(), py_p["eps_x"].cast<double>());
+                py::array_t<double> py_xa = py_p["conic_solution"];
+                std::vector<double> xa;
+                for (int i = 0; i < py_xa.size(); i++)
+                {
+                    xa.push_back(py_xa.at(i));
+                }
+                flight_plan.set_conic_solution(xa);
+            }
+
+            try
+            {
+                if (py_p["run_model"].cast<bool>())
+                {
+                    flight_plan.run_model(py_p["num_evals"].cast<int>(), py_p["eps"].cast<double>(), py_p["eps_t"].cast<double>(), py_p["eps_x"].cast<double>());
+                }
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr << "Error during run model: " << e.what() << '\n';
             }
 
             ConicLunarFlightPlan::Result result = flight_plan.output_result(py_p["eps"].cast<double>());
@@ -1426,247 +1452,7 @@ namespace conic
         return output;
     }
 
-    std::tuple<Eigen::Vector3d, Eigen::Vector3d> kepler(Eigen::Vector3d r0, Eigen::Vector3d v0, double t, double mu, double eps)
-    {
-
-    }
-
     // create different correction functions for within and outside of soi...
-
-    struct TCMData
-    {
-        astrodynamics::ConicBody* moon;
-        astrodynamics::ConicBody* planet;
-        std::vector<double> t;
-        Eigen::Vector3d r0;
-        Eigen::Vector3d v0;
-        Eigen::Vector3d rf;
-        Eigen::Vector3d vf;
-        double eps;
-    };
-
-    void constraints_tcm(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data)
-    {
-        TCMData* data = reinterpret_cast<TCMData*>(f_data);
-
-        Eigen::Vector3d rp = data->r0;
-        Eigen::Vector3d vp = data->v0;
-        Eigen::Vector3d rm = data->rf;
-        Eigen::Vector3d vm = data->vf;
-
-        double tsoi;
-
-        // within moon soi
-        for (int i = data->t.size() - 1; i > 0; i--)
-        {
-            vm(0) -= x[3 * (i - 1) + 0];
-            vm(1) -= x[3 * (i - 1) + 1];
-            vm(2) -= x[3 * (i - 1) + 2];
-
-            double t0 = data->t[i - 1];
-            double t1 = data->t[i];
-            double dtsoi = astrodynamics::hyperbolic_orbit_time_at_distance(rm, vm, data->moon->soi, data->moon->mu) - astrodynamics::hyperbolic_orbit_time_at_distance(rm, vm, rm.norm(), data->moon->mu);
-
-            if (t1 - t0 > dtsoi)
-            {
-                tsoi = t1 - dtsoi;
-                std::tie(rm, vm) = astrodynamics::kepler_s(rm, vm, tsoi - t1, data->moon->mu, data->eps);
-                break;
-            }
-
-            std::tie(rm, vm) = astrodynamics::kepler_s(rm, vm, t0 - t1, data->moon->mu, data->eps);
-        }
-
-        // within planet soi
-        for (int i = 0; i < data->t.size(); i++)
-        {
-            double t0 = data->t[i];
-            double t1 = data->t[i + 1];
-
-            if (t1 > tsoi)
-            {
-                t1 = tsoi;
-                std::tie(rp, vp) = astrodynamics::kepler_s(rp, vp, tsoi - t0, data->planet->mu, data->eps);
-                break;
-            }
-
-            std::tie(rp, vp) = astrodynamics::kepler_s(rp, vp, t1 - t0, data->planet->mu, data->eps);
-            vm(0) += x[3 * i + 0];
-            vm(1) += x[3 * i + 1];
-            vm(2) += x[3 * i + 2];
-        }
-
-        Eigen::Vector3d dr = rp - (rm + data->moon->orbit->get_position(tsoi));
-        Eigen::Vector3d dv = vp - (vm + data->moon->orbit->get_velocity(tsoi));
-
-        result[0] = dr(0) / data->moon->orbit->get_distance_scale();
-        result[1] = dr(1) / data->moon->orbit->get_distance_scale();
-        result[2] = dr(2) / data->moon->orbit->get_distance_scale();
-        result[3] = dv(0) / data->moon->orbit->get_velocity_scale();
-        result[4] = dv(1) / data->moon->orbit->get_velocity_scale();
-        result[5] = dv(2) / data->moon->orbit->get_velocity_scale();
-
-        if (grad)
-        {
-            constraint_numerical_gradient(m, n, x, grad, f_data, constraints_tcm);
-        }
-    }
-
-    double objective_tcm(unsigned n, const double* x, double* grad, void* f_data)
-    {
-        TCMData* data = reinterpret_cast<TCMData*>(f_data);
-
-        int b = 0;
-        if (data->bref == -1)
-        {
-            b = 1;
-        }
-
-        double f = 0.0;
-        for (int i = 0; i < n / 3 - b; i++)
-        {
-            f += sqrt(
-                x[3 * i + 0] * x[3 * i + 0] +
-                x[3 * i + 1] * x[3 * i + 1] +
-                x[3 * i + 2] * x[3 * i + 2]
-            );
-        }
-
-        if (grad)
-        {
-            for (int i = 0; i < n / 3; i++)
-            {
-                double dv = sqrt(
-                    x[3 * i + 0] * x[3 * i + 0] +
-                    x[3 * i + 1] * x[3 * i + 1] +
-                    x[3 * i + 2] * x[3 * i + 2]
-                );
-
-                grad[3 * i + 0] = x[3 * i + 0] / dv;
-                grad[3 * i + 1] = x[3 * i + 1] / dv;
-                grad[3 * i + 2] = x[3 * i + 2] / dv;
-            }
-        }
-
-        return f;
-    }
-
-    py::tuple trajectory_correction(py::array_t<double> py_r, py::array_t<double> py_v, py::array_t<double> py_rt, py::array_t<double> py_vt, py::array_t<double> py_t, int bref, py::tuple py_body_info)
-    {
-        try
-        {
-            py::list py_bodies = py_body_info[1];
-            int num_bodies = py_bodies.size();
-            std::vector<double> mu;
-
-            for (int i = 0; i < num_bodies; i++)
-            {
-                py::list py_body = py_bodies[i];
-                mu.push_back(py_body[1].cast<double>());
-            }
-
-            TCMData tcm_data;
-
-            tcm_data.bref = bref;
-            tcm_data.n_body_params.num_bodies = num_bodies;
-            tcm_data.n_body_params.muk = py_body_info[0].cast<double>();
-            tcm_data.n_body_params.mu = mu;
-            tcm_data.yi.resize(42 + 6 * num_bodies, 0.0);
-
-            for (int i = 0; i < py_t.size(); i++)
-            {
-                tcm_data.t.push_back(py_t.at(i));
-            }
-
-            for (int i = 0; i < 3; i++)
-            {
-                tcm_data.xf.push_back(py_rt.at(i));
-            }
-            for (int i = 0; i < 3; i++)
-            {
-                tcm_data.xf.push_back(py_vt.at(i));
-            }
-
-            for (int i = 0; i < 3; i++)
-            {
-                tcm_data.yi[i] = py_r.at(i);
-                tcm_data.yi[i + 3] = py_v.at(i);
-            }
-
-            std::vector<double> stmi = {
-                1, 0, 0, 0, 0, 0,
-                0, 1, 0, 0, 0, 0,
-                0, 0, 1, 0, 0, 0,
-                0, 0, 0, 1, 0, 0,
-                0, 0, 0, 0, 1, 0,
-                0, 0, 0, 0, 0, 1
-            };
-
-            for (int i = 0; i < 36; i++)
-            {
-                tcm_data.yi[6 + i] = stmi[i];
-            }
-
-            for (int i = 0; i < num_bodies; i++)
-            {
-                py::list py_body = py_bodies[i];
-                py::tuple r = py_body[2];
-                py::tuple v = py_body[3];
-
-                for (int j = 0; j < 6; j++)
-                {
-                    if (j < 3)
-                    {
-                        tcm_data.yi[42 + 6 * i + j] = r[j].cast<double>();
-                    }
-                    else
-                    {
-                        tcm_data.yi[42 + 6 * i + j] = v[j - 3].cast<double>();
-                    }
-                }
-            }
-
-            int m = 6;
-            int n = (tcm_data.t.size() - 1) * 3;
-            std::vector<double> x0(n, 1e-3);
-
-            std::vector<double> tol{ 5.7735e2, 5.7735e2, 5.7735e2, 5.7735e-4, 5.7735e-4, 5.7735e-4 };
-            double minf;
-
-            nlopt::opt opt = nlopt::opt("LD_SLSQP", n);
-            opt.set_min_objective(objective_tcm, &tcm_data);
-            opt.add_equality_mconstraint(constraints_tcm, &tcm_data, tol);
-            opt.set_ftol_abs(1e-4);
-            opt.optimize(x0, minf);
-
-            std::cout << std::setprecision(17);
-            std::cout << "last optimum value: " << opt.last_optimum_value() << '\n';
-            std::cout << "last optimum result: " << opt.last_optimize_result() << '\n';
-            std::cout << "num evals: " << opt.get_numevals() << '\n';
-
-            std::vector<double> result(6);
-
-            constraints_tcm(m, result.data(), n, x0.data(), NULL, &tcm_data);
-
-            py::list py_list_x0;
-
-            for (int i = 0; i < x0.size() / 3; i++)
-            {
-                py::array_t<double> dv(3);
-                auto mdv = dv.mutable_unchecked();
-                mdv(0) = x0[3 * i + 0];
-                mdv(1) = x0[3 * i + 1];
-                mdv(2) = x0[3 * i + 2];
-                py_list_x0.append(dv);
-            }
-
-            return py_list_x0;
-        }
-        catch (std::exception& e)
-        {
-            std::cerr << e.what() << "\n";
-        }
-    }
 
     void constraint_numerical_gradient(unsigned m, unsigned n, const double* x, double* grad, void* f_data,
         void(*func)(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data))
@@ -1727,6 +1513,216 @@ namespace conic
             p[i] += eps;
 
             grad[i] = (func(n, p.data(), NULL, f_data) - base) / eps;
+        }
+    }
+
+    struct TCMData
+    {
+        astrodynamics::ConicBody* moon;
+        astrodynamics::ConicBody* planet;
+        std::vector<double> t;
+        Eigen::Vector3d r0;
+        Eigen::Vector3d v0;
+        Eigen::Vector3d rf;
+        Eigen::Vector3d vf;
+        double eps;
+    };
+
+    void constraints_tcm(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data)
+    {
+        TCMData* data = reinterpret_cast<TCMData*>(f_data);
+
+        Eigen::Vector3d rp = data->r0;
+        Eigen::Vector3d vp = data->v0;
+        Eigen::Vector3d rm = data->rf - data->moon->orbit->get_position(data->t[data->t.size() - 1]);
+        Eigen::Vector3d vm = data->vf - data->moon->orbit->get_velocity(data->t[data->t.size() - 1]);
+
+        double tsoi;
+
+        // within moon soi
+        for (int i = data->t.size() - 1; i > 0; i--)
+        {
+            vm(0) -= x[3 * (i - 1) + 0];
+            vm(1) -= x[3 * (i - 1) + 1];
+            vm(2) -= x[3 * (i - 1) + 2];
+
+            double t0 = data->t[i - 1];
+            double t1 = data->t[i];
+            double dtsoi = astrodynamics::hyperbolic_orbit_time_at_distance(rm, vm, data->moon->soi, data->moon->mu) - astrodynamics::hyperbolic_orbit_time_at_distance(rm, vm, rm.norm(), data->moon->mu);
+
+            if (t1 - t0 > dtsoi)
+            {
+                tsoi = t1 - dtsoi;
+                std::tie(rm, vm) = astrodynamics::kepler_s(rm, vm, tsoi - t1, data->moon->mu, data->eps);
+                break;
+            }
+
+            std::tie(rm, vm) = astrodynamics::kepler_s(rm, vm, t0 - t1, data->moon->mu, data->eps);
+        }
+
+        // within planet soi
+        for (int i = 0; i < data->t.size(); i++)
+        {
+            double t0 = data->t[i];
+            double t1 = data->t[i + 1];
+
+            if (t1 > tsoi)
+            {
+                t1 = tsoi;
+                std::tie(rp, vp) = astrodynamics::kepler_s(rp, vp, tsoi - t0, data->planet->mu, data->eps);
+                break;
+            }
+
+            std::tie(rp, vp) = astrodynamics::kepler_s(rp, vp, t1 - t0, data->planet->mu, data->eps);
+            vp(0) += x[3 * i + 0];
+            vp(1) += x[3 * i + 1];
+            vp(2) += x[3 * i + 2];
+        }
+
+        Eigen::Vector3d dr = rp - (rm + data->moon->orbit->get_position(tsoi));
+        Eigen::Vector3d dv = vp - (vm + data->moon->orbit->get_velocity(tsoi));
+
+        result[0] = dr(0) / data->moon->orbit->get_distance_scale();
+        result[1] = dr(1) / data->moon->orbit->get_distance_scale();
+        result[2] = dr(2) / data->moon->orbit->get_distance_scale();
+        result[3] = dv(0) / data->moon->orbit->get_velocity_scale();
+        result[4] = dv(1) / data->moon->orbit->get_velocity_scale();
+        result[5] = dv(2) / data->moon->orbit->get_velocity_scale();
+
+        if (grad)
+        {
+            constraint_numerical_gradient(m, n, x, grad, f_data, constraints_tcm);
+        }
+    }
+
+    double objective_tcm(unsigned n, const double* x, double* grad, void* f_data)
+    {
+        TCMData* data = reinterpret_cast<TCMData*>(f_data);
+
+        double f = 0.0;
+        for (int i = 0; i < n / 3; i++)
+        {
+            f += sqrt(
+                x[3 * i + 0] * x[3 * i + 0] +
+                x[3 * i + 1] * x[3 * i + 1] +
+                x[3 * i + 2] * x[3 * i + 2]
+            );
+        }
+
+        if (grad)
+        {
+            objective_numerical_gradient(n, x, grad, f_data, objective_tcm);
+        }
+
+        return f;
+    }
+
+    py::tuple trajectory_correction(py::array_t<double> py_r, py::array_t<double> py_v, py::array_t<double> py_rt, py::array_t<double> py_vt, py::array_t<double> py_t, py::dict py_p)
+    {
+        try
+        {
+            Orbit planet_orbit = Orbit(
+                py_p["planet"]["orbit"]["gravitational_parameter"].cast<double>(),		// gravitational_parameter
+                py_p["planet"]["orbit"]["semi_major_axis"].cast<double>(),         	    // semi_major_axis
+                py_p["planet"]["orbit"]["eccentricity"].cast<double>(),				    // eccentricity
+                py_p["planet"]["orbit"]["inclination"].cast<double>(),				    // inclination
+                py_p["planet"]["orbit"]["longitude_of_ascending_node"].cast<double>(),	// longitude_of_ascending_node
+                py_p["planet"]["orbit"]["argument_of_periapsis"].cast<double>(),		    // argument_of_periapsis
+                py_p["planet"]["orbit"]["mean_anomaly_at_epoch"].cast<double>(),		    // mean_anomaly_at_epoch
+                py_p["planet"]["orbit"]["epoch"].cast<double>()                          // epoch
+            );
+
+            Orbit moon_orbit = Orbit(
+                py_p["moon"]["orbit"]["gravitational_parameter"].cast<double>(),		// gravitational_parameter
+                py_p["moon"]["orbit"]["semi_major_axis"].cast<double>(),         	    // semi_major_axis
+                py_p["moon"]["orbit"]["eccentricity"].cast<double>(),				    // eccentricity
+                py_p["moon"]["orbit"]["inclination"].cast<double>(),				    // inclination
+                py_p["moon"]["orbit"]["longitude_of_ascending_node"].cast<double>(),	// longitude_of_ascending_node
+                py_p["moon"]["orbit"]["argument_of_periapsis"].cast<double>(),		    // argument_of_periapsis
+                py_p["moon"]["orbit"]["mean_anomaly_at_epoch"].cast<double>(),		    // mean_anomaly_at_epoch
+                py_p["moon"]["orbit"]["epoch"].cast<double>()                           // epoch
+            );
+
+            TCMData tcm_data;
+
+            astrodynamics::ConicBody moon = { &moon_orbit, py_p["moon"]["gravitational_parameter"].cast<double>(), py_p["moon"]["soi"].cast<double>(), py_p["moon"]["radius"].cast<double>() };
+            astrodynamics::ConicBody planet = { &planet_orbit, py_p["planet"]["gravitational_parameter"].cast<double>(), py_p["planet"]["soi"].cast<double>(), py_p["planet"]["radius"].cast<double>() };
+
+            tcm_data.moon = &moon;
+            tcm_data.planet = &planet;
+
+            for (int i = 0; i < py_t.size(); i++)
+            {
+                tcm_data.t.push_back(py_t.at(i));
+            }
+
+            tcm_data.r0(0) = py_r.at(0);
+            tcm_data.r0(1) = py_r.at(1);
+            tcm_data.r0(2) = py_r.at(2);
+
+            tcm_data.v0(0) = py_v.at(0);
+            tcm_data.v0(1) = py_v.at(1);
+            tcm_data.v0(2) = py_v.at(2);
+
+            tcm_data.rf(0) = py_rt.at(0);
+            tcm_data.rf(1) = py_rt.at(1);
+            tcm_data.rf(2) = py_rt.at(2);
+
+            tcm_data.vf(0) = py_vt.at(0);
+            tcm_data.vf(1) = py_vt.at(1);
+            tcm_data.vf(2) = py_vt.at(2);
+
+            tcm_data.eps = py_p["eps"].cast<double>();
+
+            std::cout << moon.orbit->get_position(tcm_data.t[0]).transpose() << '\n';
+
+            int m = 6;
+            int n = (tcm_data.t.size() - 1) * 3;
+            std::vector<double> x0(n, tcm_data.eps);
+
+            std::vector<double> tol(m, tcm_data.eps);
+            double minf;
+
+            nlopt::opt opt = nlopt::opt("LD_SLSQP", n);
+            opt.set_min_objective(objective_tcm, &tcm_data);
+            opt.add_equality_mconstraint(constraints_tcm, &tcm_data, tol);
+            opt.set_ftol_abs(tcm_data.eps);
+
+            try
+            {
+                opt.optimize(x0, minf);
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr << "Error during optimization: " << e.what() << '\n';
+            }
+
+            std::cout << std::setprecision(17);
+            std::cout << "last optimum value: " << opt.last_optimum_value() << '\n';
+            std::cout << "last optimum result: " << opt.last_optimize_result() << '\n';
+            std::cout << "num evals: " << opt.get_numevals() << '\n';
+
+            std::vector<double> result(6);
+
+            constraints_tcm(m, result.data(), n, x0.data(), NULL, &tcm_data);
+
+            py::list py_list_x0;
+
+            for (int i = 0; i < x0.size() / 3; i++)
+            {
+                py::array_t<double> dv(3);
+                auto mdv = dv.mutable_unchecked();
+                mdv(0) = x0[3 * i + 0];
+                mdv(1) = x0[3 * i + 1];
+                mdv(2) = x0[3 * i + 2];
+                py_list_x0.append(dv);
+            }
+
+            return py_list_x0;
+        }
+        catch (std::exception& e)
+        {
+            std::cerr << e.what() << "\n";
         }
     }
 }

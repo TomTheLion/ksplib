@@ -26,13 +26,14 @@ public:
 	void add_min_flight_time_constraint(double min_time);
 	void add_max_flight_time_constraint(double max_time);
 	void add_inclination_constraint(bool launch, double min, double max, Eigen::Vector3d n);
-
+    void add_launch_plane_constraint(double tol, Eigen::Vector3d n);
 	//
 	// model functions
 	//
 
     void init_model();
 	void run_model(int max_eval, double eps, double eps_t, double eps_x);
+    void set_conic_solution(std::vector<double> x);
 
     struct Result
     {
@@ -68,7 +69,9 @@ private:
         double max_time;
         double min_inclination_launch;
         double max_inclination_launch;    
+        double n_launch_direction;
         Eigen::Vector3d n_launch;
+        Eigen::Vector3d n_launch_plane;
         double min_inclination_arrival;
         double max_inclination_arrival;
         Eigen::Vector3d n_arrival;

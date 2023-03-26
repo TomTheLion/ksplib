@@ -269,9 +269,18 @@ namespace astrodynamics
     {
         double e = orbit_eccentricity(rp, vp, mu);
         double a = orbit_semi_major_axis(rp, vp, mu);
-        double h = acosh((-d / a + 1.0) / e);
 
-        return (e * sinh(h) - h) / sqrt(mu / -pow(a, 3));
+		if (e < 1.0)
+		{
+			double eccentric_anomaly = acos((1.0 - rp.norm() / a) / e);
+			double mean_anomaly = eccentric_anomaly - e * sin(eccentric_anomaly);
+			return mean_anomaly * sqrt(pow(a, 3) / mu);
+		}
+		else
+		{
+			double h = acosh((-d / a + 1.0) / e);
+			return (e * sinh(h) - h) / sqrt(mu / -pow(a, 3));
+		}
     }
 
 	//
