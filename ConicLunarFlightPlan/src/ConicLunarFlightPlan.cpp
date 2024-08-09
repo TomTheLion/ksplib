@@ -228,7 +228,7 @@ void ConicLunarFlightPlan::run_model(int max_eval, double eps, double eps_t, dou
 }
 
 // set conic solution
-void ConicLunarFlightPlan::set_solution(std::vector<double> x)
+void ConicLunarFlightPlan::set_conic_solution(std::vector<double> x)
 {
     x_ = x;
 }

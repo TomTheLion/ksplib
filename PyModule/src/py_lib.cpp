@@ -851,6 +851,270 @@ namespace lunar
 
 namespace kerbal_guidance_system
 {
+    const double pi = 3.14159265358979323846;
+
+    // general functions
+    void solve_ivp(double t, double tout, py::array_t<double> py_y, py::dict py_p, void f(double t, double y[], double yp[], void* params), void* params)
+    {
+        double* y = py_arr_ptr(py_y);
+        double relerr = py_p["relerr"].cast<double>();
+        double abserr = py_p["relerr"].cast<double>();
+        Equation eq = Equation(f, 7, y, t, relerr, abserr, params);
+        eq.step(tout);
+        eq.get_y(0, 7, y);
+    }
+
+    py::array_t<double> output_ivp(double t, double tout, int steps, py::object py_y, py::dict py_p, void f(double t, double y[], double yp[], void* params), void f_output(double t, double y[], double yp[], void* params), void* params)
+    {
+        double* y = py_arr_ptr(py_y);
+        double relerr = py_p["relerr"].cast<double>();
+        double abserr = py_p["relerr"].cast<double>();
+        Equation eq = Equation(f, 7, y, t, relerr, abserr, params);
+        py::array_t<double> output({ steps, 20 });
+        double* output_ptr = py_arr_ptr(output);
+        double dt = (tout - t) / steps;
+        for (int i = 0; i < steps; i++) {
+            double tout = t + (i + 1) * dt;
+            eq.step(tout);
+            eq.get_y(0, 7, y);
+            f_output(tout, y, &output_ptr[20 * i], params);
+        }
+
+        return output;
+    }
+
+    // atmospheric phase parameters
+    struct AtmStateParams
+    {
+        double mu;
+        double pitch_time;
+        double pitch_duration;
+        double pitch_angle;
+        double azimuth;
+        double a_limit;
+        double mass_rate;
+        Spl thrust;
+        Spl pressure;
+        Spl density;
+        Spl drag;
+        Spl drag_mul;
+    };
+
+    AtmStateParams init_atm_state_params(py::dict py_p)
+    {
+        AtmStateParams p{
+            py_p["mu"].cast<double>(),
+            py_p["pitch_time"].cast<double>(),
+            py_p["pitch_duration"].cast<double>(),
+            py_p["pitch_angle"].cast<double>(),
+            py_p["azimuth"].cast<double>(),
+            py_p["a_limit"].cast<double>(),
+            py_p["mass_rate"].cast<double>(),
+            py_spl(py_p["spl_thrust"]),
+            py_spl(py_p["spl_pressure"]),
+            py_spl(py_p["spl_density"]),
+            py_spl(py_p["spl_drag"]),
+            py_spl(py_p["spl_drag_mul"]),
+        };
+
+        return p;
+    }
+
+    // atmospheric phase functions
+    void atm_state(double t, double y[], double yp[], void* params)
+    {
+        AtmStateParams* p = reinterpret_cast<AtmStateParams*>(params);
+
+        Eigen::Vector3d r = { y[0], y[1], y[2] };
+        Eigen::Vector3d v = { y[3], y[4], y[5] };
+        double m = y[6];
+
+        double pitch = pi / 2.0;
+        if (t > p->pitch_time) {
+            pitch -= astrodynamics::vector_angle(r, v);
+            if (t < p->pitch_time + p->pitch_duration)
+            {
+                pitch -= p->pitch_angle * (1.0 - abs(2.0 * (t - p->pitch_time) / p->pitch_duration - 1.0));
+            }  
+         }
+
+        Eigen::Vector3d attitude = Eigen::AngleAxisd(p->azimuth, r.normalized()) * r.cross(Eigen::Vector3d::UnitY()).normalized();
+        attitude = Eigen::AngleAxisd(pitch, attitude.cross(r).normalized()) * attitude;
+
+        double pressure = exp(p->pressure.eval(r.norm()));
+        double density = exp(p->density.eval(r.norm()));
+        double mach = v.norm() / sqrt(1.4 * pressure / density);
+        double pseudo_drag = p->drag.eval(mach) * p->drag_mul.eval(density * v.norm());
+        double thrust = p->thrust.eval(pressure / 101325.0);
+        double throttle = p->a_limit ? std::min(1.0, p->a_limit / (thrust / m)) : 1.0;
+
+        Eigen::Vector3d a_thrust = thrust / m * attitude * throttle;
+        Eigen::Vector3d a_drag = -v.normalized() * pseudo_drag * density * v.squaredNorm() / m;
+        Eigen::Vector3d a_gravity = -p->mu * r / pow(r.norm(), 3);
+
+        Eigen::Vector3d a = a_thrust + a_drag + a_gravity;
+
+        yp[0] = v[0];
+        yp[1] = v[1];
+        yp[2] = v[2];
+        yp[3] = a[0];
+        yp[4] = a[1];
+        yp[5] = a[2];
+        yp[6] = -p->mass_rate * throttle;
+    }
+
+    void output_atm_state(double t, double y[], double output[], void* params)
+    {
+        AtmStateParams* p = reinterpret_cast<AtmStateParams*>(params);
+
+        Eigen::Vector3d r = { y[0], y[1], y[2] };
+        Eigen::Vector3d v = { y[3], y[4], y[5] };
+        double m = y[6];
+
+        double pitch = pi / 2.0;
+        if (t > p->pitch_time) {
+            pitch -= astrodynamics::vector_angle(r, v);
+            if (t < p->pitch_time + p->pitch_duration)
+            {
+                pitch -= p->pitch_angle * (1.0 - abs(2.0 * (t - p->pitch_time) / p->pitch_duration - 1.0));
+            }
+        }
+
+        Eigen::Vector3d attitude = Eigen::AngleAxisd(p->azimuth, r.normalized()) * r.cross(Eigen::Vector3d::UnitY()).normalized();
+        attitude = Eigen::AngleAxisd(pitch, attitude.cross(r).normalized()) * attitude;
+
+        double pressure = exp(p->pressure.eval(r.norm()));
+        double density = exp(p->density.eval(r.norm()));
+        double mach = v.norm() / sqrt(1.4 * pressure / density);
+        double pseudo_drag = p->drag.eval(mach) * p->drag_mul.eval(density * v.norm());
+        double thrust = p->thrust.eval(pressure / 101325.0);
+        double throttle = p->a_limit ? std::min(1.0, p->a_limit / (thrust / m)) : 1.0;
+
+        Eigen::Vector3d a_thrust = thrust / m * attitude * throttle;
+        Eigen::Vector3d a_drag = -v.normalized() * pseudo_drag * density * v.squaredNorm() / m;
+        Eigen::Vector3d a_gravity = -p->mu * r / pow(r.norm(), 3);
+
+        Eigen::Vector3d a = a_thrust + a_drag + a_gravity;
+
+        output[0] = t;
+        output[1] = m;
+        output[2] = throttle;
+        output[3] = pitch;
+        output[4] = mach;
+        for (size_t i = 0; i < 3; i++) {
+            output[i + 5] = r[i];
+            output[i + 8] = v[i];
+            output[i + 11] = a_thrust[i];
+            output[i + 14] = a_drag[i];
+            output[i + 17] = a_gravity[i];
+        }
+    }
+
+    void solve_atm_ivp(double t, double tout, py::array_t<double> py_y, py::dict py_p)
+    {
+        AtmStateParams p = init_atm_state_params(py_p);
+        solve_ivp(t, tout, py_y, py_p, atm_state, &p);
+    }
+
+    py::array_t<double> output_atm_ivp(double t, double tout, int steps, py::object py_y, py::dict py_p)
+    {
+        AtmStateParams p = init_atm_state_params(py_p);
+        return output_ivp(t, tout, steps, py_y, py_p, atm_state, output_atm_state, &p);
+    }
+
+    // vacuum phase parameters
+    struct VacStateParams
+    {
+        double tg;
+        double a_limit;
+        double thrust;
+        double mass_rate;
+        Eigen::Vector3d lambda_i;
+        Eigen::Vector3d lambda_dot_i;
+    };
+
+    VacStateParams init_vac_state_params(py::dict py_p)
+    {
+        VacStateParams p{
+            py_p["tg"].cast<double>(),
+            py_p["a_limit"].cast<double>(),
+            py_p["thrust"].cast<double>(),
+            py_p["mass_rate"].cast<double>(),
+            py_vector3d(py_p["lambda_i"]),
+            py_vector3d(py_p["lambda_dot_i"])
+        };
+
+        return p;
+    }
+
+    // vacuum phase functions
+    void vac_state(double t, double y[], double yp[], void* params)
+    {
+        VacStateParams* p = reinterpret_cast<VacStateParams*>(params);
+
+        Eigen::Vector3d r = { y[0], y[1], y[2] };
+        Eigen::Vector3d v = { y[3], y[4], y[5] };
+        double m = y[6];
+
+        double a_thrust_mag = p->thrust / m;
+        double throttle = p->a_limit ? std::min(1.0, p->a_limit / a_thrust_mag) : 1.0;
+
+        Eigen::Vector3d lambda = p->lambda_i * cos(t - p->tg) + p->lambda_dot_i * sin(t - p->tg);
+        Eigen::Vector3d a = -r / pow(r.norm(), 3) + throttle * a_thrust_mag * lambda.normalized();
+
+        yp[0] = v[0];
+        yp[1] = v[1];
+        yp[2] = v[2];
+        yp[3] = a[0];
+        yp[4] = a[1];
+        yp[5] = a[2];
+        yp[6] = -p->mass_rate * throttle;
+    }
+
+    void output_vac_state(double t, double y[], double output[], void* params)
+    {
+        VacStateParams* p = reinterpret_cast<VacStateParams*>(params);
+
+        Eigen::Vector3d r = { y[0], y[1], y[2] };
+        Eigen::Vector3d v = { y[3], y[4], y[5] };
+        double m = y[6];
+
+        double a_thrust_mag = p->thrust / m;
+        double throttle = p->a_limit ? std::min(1.0, p->a_limit / a_thrust_mag) : 1.0;
+
+        Eigen::Vector3d lambda = p->lambda_i * cos(t - p->tg) + p->lambda_dot_i * sin(t - p->tg);
+        Eigen::Vector3d a_gravity = -r / pow(r.norm(), 3);
+        Eigen::Vector3d a_thrust = throttle * a_thrust_mag * lambda.normalized();
+
+        output[0] = t;
+        output[1] = m;
+        output[2] = throttle;
+        output[3] = 0.0;
+        output[4] = 0.0;
+        for (size_t i = 0; i < 3; i++) {
+            output[i + 5] = r[i];
+            output[i + 8] = v[i];
+            output[i + 11] = a_thrust[i];
+            output[i + 14] = 0.0;
+            output[i + 17] = a_gravity[i];
+        }
+    }
+
+    void solve_vac_ivp(double t, double tout, py::object py_y, py::dict py_p)
+    {
+        VacStateParams p = init_vac_state_params(py_p);
+        solve_ivp(t, tout, py_y, py_p, vac_state, &p);
+    }
+
+    py::array_t<double> output_vac_ivp(double t, double tout, int steps, py::object py_y, py::dict py_p)
+    {
+        VacStateParams p = init_vac_state_params(py_p);
+        return output_ivp(t, tout, steps, py_y, py_p, vac_state, output_vac_state, &p);
+    }
+}
+
+namespace kerbal_guidance_system_
+{
     // python interface functions
     const double pi = 3.14159265358979323846;
 
