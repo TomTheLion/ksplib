@@ -870,11 +870,11 @@ namespace kerbal_guidance_system
         double relerr = py_p["relerr"].cast<double>();
         double abserr = py_p["relerr"].cast<double>();
         Equation eq = Equation(f, 7, y, t, relerr, abserr, params);
-        py::array_t<double> output({ steps, 20 });
+        py::array_t<double> output({ steps + 1, 20 });
         double* output_ptr = py_arr_ptr(output);
         double dt = (tout - t) / steps;
-        for (int i = 0; i < steps; i++) {
-            double tout = t + (i + 1) * dt;
+        for (int i = 0; i < steps + 1; i++) {
+            double tout = t + i * dt;
             eq.step(tout);
             eq.get_y(0, 7, y);
             f_output(tout, y, &output_ptr[20 * i], params);
@@ -930,13 +930,10 @@ namespace kerbal_guidance_system
         double m = y[6];
 
         double pitch = pi / 2.0;
-        if (t > p->pitch_time) {
-            pitch -= astrodynamics::vector_angle(r, v);
-            if (t < p->pitch_time + p->pitch_duration)
-            {
-                pitch -= p->pitch_angle * (1.0 - abs(2.0 * (t - p->pitch_time) / p->pitch_duration - 1.0));
-            }  
-         }
+        if (t > p->pitch_time)
+        {
+            pitch -= std::max(astrodynamics::vector_angle(r, v), p->pitch_angle * std::min(1.0, (t - p->pitch_time) / p->pitch_duration));
+        }
 
         Eigen::Vector3d attitude = Eigen::AngleAxisd(p->azimuth, r.normalized()) * r.cross(Eigen::Vector3d::UnitY()).normalized();
         attitude = Eigen::AngleAxisd(pitch, attitude.cross(r).normalized()) * attitude;
@@ -972,12 +969,9 @@ namespace kerbal_guidance_system
         double m = y[6];
 
         double pitch = pi / 2.0;
-        if (t > p->pitch_time) {
-            pitch -= astrodynamics::vector_angle(r, v);
-            if (t < p->pitch_time + p->pitch_duration)
-            {
-                pitch -= p->pitch_angle * (1.0 - abs(2.0 * (t - p->pitch_time) / p->pitch_duration - 1.0));
-            }
+        if (t > p->pitch_time)
+        {
+            pitch -= std::max(astrodynamics::vector_angle(r, v), p->pitch_angle * std::min(1.0, (t - p->pitch_time) / p->pitch_duration));
         }
 
         Eigen::Vector3d attitude = Eigen::AngleAxisd(p->azimuth, r.normalized()) * r.cross(Eigen::Vector3d::UnitY()).normalized();
