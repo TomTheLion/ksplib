@@ -943,10 +943,11 @@ namespace kerbal_guidance_system
         double mach = v.norm() / sqrt(1.4 * pressure / density);
         double pseudo_drag = p->drag.eval(mach) * p->drag_mul.eval(density * v.norm());
         double thrust = p->thrust.eval(pressure / 101325.0);
+        double drag = pseudo_drag * density * v.squaredNorm();
         double throttle = p->a_limit ? std::min(1.0, p->a_limit / (thrust / m)) : 1.0;
 
+        Eigen::Vector3d a_drag = -v.normalized() * drag / m;
         Eigen::Vector3d a_thrust = thrust / m * attitude * throttle;
-        Eigen::Vector3d a_drag = -v.normalized() * pseudo_drag * density * v.squaredNorm() / m;
         Eigen::Vector3d a_gravity = -p->mu * r / pow(r.norm(), 3);
 
         Eigen::Vector3d a = a_thrust + a_drag + a_gravity;
@@ -982,10 +983,11 @@ namespace kerbal_guidance_system
         double mach = v.norm() / sqrt(1.4 * pressure / density);
         double pseudo_drag = p->drag.eval(mach) * p->drag_mul.eval(density * v.norm());
         double thrust = p->thrust.eval(pressure / 101325.0);
+        double drag = pseudo_drag * density * v.squaredNorm();
         double throttle = p->a_limit ? std::min(1.0, p->a_limit / (thrust / m)) : 1.0;
 
+        Eigen::Vector3d a_drag = -v.normalized() * drag / m;
         Eigen::Vector3d a_thrust = thrust / m * attitude * throttle;
-        Eigen::Vector3d a_drag = -v.normalized() * pseudo_drag * density * v.squaredNorm() / m;
         Eigen::Vector3d a_gravity = -p->mu * r / pow(r.norm(), 3);
 
         Eigen::Vector3d a = a_thrust + a_drag + a_gravity;
@@ -1104,6 +1106,74 @@ namespace kerbal_guidance_system
     {
         VacStateParams p = init_vac_state_params(py_p);
         return output_ivp(t, tout, steps, py_y, py_p, vac_state, output_vac_state, &p);
+    }
+
+    py::array_t<double> constraint_residuals(double t, py::array_t<double> py_x, py::array_t<double> py_y, py::array_t<double> py_p, py::array_t<double> py_c, double a_limit, double abserr, double relerr)
+    {
+        double* x_ptr = py_x.mutable_data();
+        double* y_ptr = py_y.mutable_data();
+        double* p_ptr = py_p.mutable_data();
+        double* c_ptr = py_c.mutable_data();
+        py::buffer_info p_info = py_p.request();
+
+        bool last = false;
+        double tf = t + x_ptr[6];
+
+        Eigen::Vector3d lambda_i = { x_ptr[0], x_ptr[1], x_ptr[2] };
+        Eigen::Vector3d lambda_dot_i = { x_ptr[3], x_ptr[4], x_ptr[5] };
+
+        VacStateParams p{
+            t,
+            a_limit,
+            0.0,
+            0.0,
+            lambda_i,
+            lambda_dot_i
+        };
+
+        for (size_t i = 0; i < p_info.shape[0]; i++)
+        {
+            double tout = p_ptr[4 * i + 0];
+            double mf = p_ptr[4 * i + 1];
+            p.mass_rate = p_ptr[4 * i + 2];
+            p.thrust = p_ptr[4 * i + 3];
+            
+            if (tout < t) { continue;  }
+            if ( mf > 0 ) { y_ptr[6] = mf; }
+            if (tout > tf) {
+                tout = tf;
+                last = true;
+            }
+
+            Equation eq = Equation(vac_state, 7, y_ptr, t, relerr, abserr, &p);
+            eq.step(tout);
+            eq.get_y(0, 7, y_ptr);
+
+            t = tout;
+
+            if (last) { break; }
+        }
+
+        py::array_t<double> f({ 1, 7 });
+        f = f.reshape({ 7 });
+        double* f_ptr = f.mutable_data();
+
+        Eigen::Vector3d rf = { y_ptr[0], y_ptr[1], y_ptr[2] };
+        Eigen::Vector3d vf = { y_ptr[3], y_ptr[4], y_ptr[5] };
+
+        Eigen::Vector3d lambda_f = lambda_i * cos(x_ptr[6]) + lambda_dot_i * sin(x_ptr[6]);
+        Eigen::Vector3d lambda_dot_f = -lambda_i * sin(x_ptr[6]) + lambda_dot_i * cos(x_ptr[6]);
+        Eigen::Vector3d sigma = rf.cross(lambda_dot_f) - vf.cross(lambda_f);
+
+        f_ptr[0] = rf.dot(rf) - c_ptr[0];
+        f_ptr[1] = vf.dot(vf) - c_ptr[1];
+        f_ptr[2] = rf.dot(vf) - c_ptr[2];
+        f_ptr[3] = sigma[0];
+        f_ptr[4] = sigma[1];
+        f_ptr[5] = sigma[2];
+        f_ptr[6] = lambda_dot_f.norm() - 1.0;
+
+        return f;
     }
 }
 

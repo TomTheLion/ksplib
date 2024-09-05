@@ -48,6 +48,7 @@ namespace kerbal_guidance_system
     py::array_t<double> output_atm_ivp(double t, double tout, int steps, py::object py_y, py::dict py_p);
     py::array_t<double> output_vac_ivp(double t, double tout, int steps, py::object py_y, py::dict py_p);
     void solve_orbit_burn(double t, double tout, py::object py_y, py::dict py_p);
+    py::array_t<double> constraint_residuals(double t, py::array_t<double> py_x, py::array_t<double> py_y, py::array_t<double> py_p, py::array_t<double> py_c, double a_limit, double abserr, double relerr);
 }
 
 namespace conic
