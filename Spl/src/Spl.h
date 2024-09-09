@@ -5,6 +5,7 @@ class Spl
 {
 public:
 
+    Spl();
     Spl(double* t, double* c, int n, int k);
     Spl(double* tx, double* ty, double* c, int nx, int ny, int kx, int ky);
 

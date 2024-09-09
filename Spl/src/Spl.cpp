@@ -2,6 +2,12 @@
 #include <vector>
 
 
+Spl::Spl()
+    : tx_(nullptr), ty_(nullptr), c_(nullptr), nx_(0), ny_(0), kx_(0), ky_(0)
+{
+
+}
+
 Spl::Spl(double* t, double* c, int n, int k)
 	: tx_(t), ty_(nullptr), c_(c), nx_(n), ny_(0), kx_(k), ky_(0)
 {
@@ -18,14 +24,9 @@ Spl::Spl(double* tx, double* ty, double* c, int nx, int ny, int kx, int ky)
 
 double Spl::eval(double x, double y)
 {
-    if (ty_)
-    {
-        return bispeval(x, y);
-    }
-    else
-    {
-        return speval(x, tx_, c_, nx_, kx_);
-    }
+    if (!tx_) { return 0.0; }
+    if (!ty_) { return speval(x, tx_, c_, nx_, kx_); }
+    return bispeval(x, y);
 }
 
 

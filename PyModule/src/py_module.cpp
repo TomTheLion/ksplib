@@ -28,6 +28,7 @@ PYBIND11_MODULE(ksplib, m) {
     sm_kgs.def("output_atm_ivp", &kerbal_guidance_system::output_atm_ivp, "t"_a, "tout"_a, "steps"_a, "y"_a, "p"_a);
     sm_kgs.def("output_vac_ivp", &kerbal_guidance_system::output_vac_ivp, "t"_a, "tout"_a, "steps"_a, "y"_a, "p"_a);
     sm_kgs.def("constraint_residuals", &kerbal_guidance_system::constraint_residuals, "t"_a, "x"_a, "y"_a, "p"_a, "c"_a, "a_limit"_a, "relerr"_a, "abserr"_a);
+    sm_kgs.def("output_time_series", &kerbal_guidance_system::output_time_series, "p"_a);
     // sm_kgs.def("solve_orbit_burn", &kerbal_guidance_system::solve_orbit_burn, "t"_a, "tout"_a, "y"_a, "p"_a);
 
     // flight plan functions
