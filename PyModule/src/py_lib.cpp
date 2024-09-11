@@ -22,6 +22,12 @@ int py_arr_size(py::object obj)
     return obj.cast<py::array_t<double>>().request().size;
 }
 
+py::array_t<double> py_array_copy(py::object obj)
+{
+    py::array_t<double> arr_copy = py::array_t<double>((obj.cast<py::array_t<double>>().request()));
+    return arr_copy;
+}
+
 Eigen::Vector3d py_vector3d(py::object obj)
 {
     return Eigen::Map<Eigen::Vector3d>(py_arr_ptr(obj.cast<py::array_t<double>>()));
@@ -1096,34 +1102,29 @@ namespace lunar
 
 namespace kerbal_guidance_system
 {
-    struct Result
-    {
-        double throttle;
-        Eigen::Vector3d a_drag;
-        Eigen::Vector3d a_thrust;
-        Eigen::Vector3d a_gravity;
-    };
-
     struct AtmParams
     {
-        double initial_time;
-        double launch_time;
-        double initial_angle;
-        Eigen::Vector3d angular_velocity;
         double mu;
+        double initial_rotation;
+        Eigen::Vector3d angular_velocity;
+        double a_limit;
+        double launch_time;
+        double azimuth;
         double pitch_time;
         double pitch_duration;
         double pitch_rate;
-        double azimuth;
-        double a_limit;
-        double mass_rate;
-        Spl thrust;
+        double switch_altitude;
         Spl pressure;
         Spl density;
         Spl drag;
         Spl drag_mul;
-        Result result;
-
+        Spl thrust;
+        double mass_rate;
+        double throttled_mass_rate;
+        Eigen::Vector3d a_drag;
+        Eigen::Vector3d a_thrust;
+        Eigen::Vector3d a_gravity;
+        Eigen::Vector3d a_rotation;
     };
 
     struct VacParams
@@ -1132,16 +1133,18 @@ namespace kerbal_guidance_system
         double ndim_distance;
         double ndim_velocity;
         double ndim_acceleration;
-        double tg;
         double a_limit;
-        double thrust;
-        double mass_rate;
+        double tg;
         Eigen::Vector3d lambda_i;
         Eigen::Vector3d lambda_dot_i;
-        Result result;
+        double thrust;
+        double mass_rate;
+        double throttled_mass_rate;
+        Eigen::Vector3d a_thrust;
+        Eigen::Vector3d a_gravity;
     };
 
-    void atm_acceleration(double t, double y[], AtmParams* p)
+    static void atm_acceleration(double t, double y[], AtmParams* p)
     {
         Eigen::Map<Eigen::Vector3d> r(y);
         Eigen::Map<Eigen::Vector3d> v(y + 3);
@@ -1163,16 +1166,15 @@ namespace kerbal_guidance_system
         double drag = pseudo_drag * density * v.squaredNorm();
         double thrust = p->thrust.eval(pressure / 101325.0);
         double throttle = p->a_limit ? std::min(1.0, p->a_limit / (thrust / m)) : 1.0;
-
-        p->result = Result{
-            throttle,
-            -v.normalized() * drag / m,
-            attitude * throttle * thrust / m,
-            -p->mu * r / pow(r.norm(), 3)// - 2 * p->angular_velocity.cross(v) - p->angular_velocity.cross(p->angular_velocity.cross(r))
-        };
+        
+        p->throttled_mass_rate = throttle * p->mass_rate;
+        p->a_drag = -v.normalized() * drag / m;
+        p->a_thrust = attitude * throttle * thrust / m,
+        p->a_gravity = -p->mu * r / pow(r.norm(), 3);
+        p->a_rotation = -2 * p->angular_velocity.cross(v) - p->angular_velocity.cross(p->angular_velocity.cross(r));
     }
 
-    void vac_acceleration(double t, double y[], VacParams* p)
+    static void vac_acceleration(double t, double y[], VacParams* p)
     {
         Eigen::Map<Eigen::Vector3d> r(y);
         Eigen::Map<Eigen::Vector3d> v(y + 3);
@@ -1182,19 +1184,16 @@ namespace kerbal_guidance_system
         double throttle = p->a_limit ? std::min(1.0, p->a_limit / a_thrust_mag) : 1.0;
         Eigen::Vector3d lambda = p->lambda_i * cos(t - p->tg) + p->lambda_dot_i * sin(t - p->tg);
 
-        p->result = Result{
-            throttle,
-            Eigen::Vector3d::Zero(),
-            throttle * a_thrust_mag * lambda.normalized(),
-            -r / pow(r.norm(), 3)
-        };
+        p->throttled_mass_rate = throttle * p->mass_rate;
+        p->a_thrust = throttle * a_thrust_mag* lambda.normalized();
+        p->a_gravity = -r / pow(r.norm(), 3);
     }
 
-    void atm_state_(double t, double y[], double yp[], void* params)
+    static void atm_state(double t, double y[], double yp[], void* params)
     {
         AtmParams* p = reinterpret_cast<AtmParams*>(params);
         atm_acceleration(t, y, p);
-        Eigen::Vector3d a = p->result.a_drag + p->result.a_thrust + p->result.a_gravity;
+        Eigen::Vector3d a = p->a_drag + p->a_thrust + p->a_gravity + p->a_rotation;
 
         yp[0] = y[3];
         yp[1] = y[4];
@@ -1202,14 +1201,14 @@ namespace kerbal_guidance_system
         yp[3] = a[0];
         yp[4] = a[1];
         yp[5] = a[2];
-        yp[6] = -p->mass_rate * p->result.throttle;
+        yp[6] = -p->throttled_mass_rate;
     }
 
-    void vac_state_(double t, double y[], double yp[], void* params)
+    static void vac_state(double t, double y[], double yp[], void* params)
     {
         VacParams* p = reinterpret_cast<VacParams*>(params);
         vac_acceleration(t, y, p);
-        Eigen::Vector3d a = p->result.a_thrust + p->result.a_gravity;
+        Eigen::Vector3d a = p->a_thrust + p->a_gravity;
 
         yp[0] = y[3];
         yp[1] = y[4];
@@ -1217,10 +1216,10 @@ namespace kerbal_guidance_system
         yp[3] = a[0];
         yp[4] = a[1];
         yp[5] = a[2];
-        yp[6] = -p->mass_rate * p->result.throttle;
+        yp[6] = -p->throttled_mass_rate;
     }
 
-    void push_back_eigen_vectors(std::vector<double>* vector, std::vector<Eigen::Vector3d>* eigen_vectors)
+    static void push_back_eigen_vectors(std::vector<double>* vector, std::vector<Eigen::Vector3d>* eigen_vectors)
     {
         for (auto& eigen_vector : *eigen_vectors)
         {
@@ -1231,87 +1230,88 @@ namespace kerbal_guidance_system
         }
     }
 
-    void output_atm_(double* y_ptr, AtmParams& atm_params, Equation& eq, std::vector<double>* output)
+    static void output_atm(double t, double* y, AtmParams& atm_params, std::vector<double>* output)
     {
-        atm_acceleration(eq.get_t(), y_ptr, &atm_params);
-        double angle = atm_params.initial_angle + (eq.get_t() + atm_params.launch_time - atm_params.initial_time) * atm_params.angular_velocity.norm();
+        atm_acceleration(t, y, &atm_params);
+        double angle = atm_params.initial_rotation + (t + atm_params.launch_time) * atm_params.angular_velocity.norm();
         Eigen::Vector3d axis = atm_params.angular_velocity.normalized();
         Eigen::AngleAxisd rotation = Eigen::AngleAxisd(angle, axis);
 
-        output->push_back(eq.get_t());
-        output->push_back(eq.get_y(6));
-        std::vector<Eigen::Vector3d> eigen_vectors(5);
-        eigen_vectors[0] = rotation * Eigen::Vector3d(eq.get_y(0), eq.get_y(1), eq.get_y(2));
-        eigen_vectors[1] = rotation * Eigen::Vector3d(eq.get_y(3), eq.get_y(4), eq.get_y(5)) + atm_params.angular_velocity.cross(eigen_vectors[0]);
-        eigen_vectors[2] = rotation * atm_params.result.a_drag;
-        eigen_vectors[3] = rotation * atm_params.result.a_thrust;
-        eigen_vectors[4] = rotation * atm_params.result.a_gravity;
+        output->push_back(t);
+        output->push_back(y[6]);
+        Eigen::Map<Eigen::Vector3d> r(y);
+        Eigen::Map<Eigen::Vector3d> v(y + 3);
+        std::vector<Eigen::Vector3d> eigen_vectors(6);
+        eigen_vectors[0] = rotation * r;
+        eigen_vectors[1] = rotation * v + atm_params.angular_velocity.cross(eigen_vectors[0]);
+        eigen_vectors[2] = rotation * atm_params.a_drag;
+        eigen_vectors[3] = rotation * atm_params.a_thrust;
+        eigen_vectors[4] = rotation * atm_params.a_gravity;
+        eigen_vectors[5] = rotation * atm_params.a_rotation;
 
         push_back_eigen_vectors(output, &eigen_vectors);
     }
 
-    void output_vac_(double* y_ptr, VacParams& vac_params, Equation& eq, std::vector<double>* output)
+    static void output_vac(double* y_ptr, VacParams& vac_params, Equation& eq, std::vector<double>* output)
     {
         vac_acceleration(eq.get_t(), y_ptr, &vac_params);
 
         output->push_back(eq.get_t() * vac_params.ndim_time);
         output->push_back(eq.get_y(6));
-        std::vector<Eigen::Vector3d> eigen_vectors(5);
-        eigen_vectors[0] = vac_params.ndim_distance * Eigen::Vector3d(eq.get_y(0), eq.get_y(1), eq.get_y(2));
-        eigen_vectors[1] = vac_params.ndim_velocity * Eigen::Vector3d(eq.get_y(3), eq.get_y(4), eq.get_y(5));
+        std::vector<Eigen::Vector3d> eigen_vectors(6);
+        eigen_vectors[0] = vac_params.ndim_distance * Eigen::Map<Eigen::Vector3d>(y_ptr);
+        eigen_vectors[1] = vac_params.ndim_velocity * Eigen::Map<Eigen::Vector3d>(y_ptr  + 3);
         eigen_vectors[2] = Eigen::Vector3d::Zero();
-        eigen_vectors[3] = vac_params.ndim_acceleration * vac_params.result.a_thrust;
-        eigen_vectors[4] = vac_params.ndim_acceleration * vac_params.result.a_gravity;
+        eigen_vectors[3] = vac_params.ndim_acceleration * vac_params.a_thrust;
+        eigen_vectors[4] = vac_params.ndim_acceleration * vac_params.a_gravity;
+        eigen_vectors[5] = Eigen::Vector3d::Zero();
 
         push_back_eigen_vectors(output, &eigen_vectors);
     }
 
-    double simulate_atm_phase(py::dict py_p, std::vector<double>* output)
+    static void simulate_atm_phase(double& t, double* y_ptr, py::list py_events, py::dict py_p, double relerr, double abserr, std::vector<double>* output)
     {
         AtmParams atm_params = {
-            py_p["initial_time"].cast<double>(),
-            py_p["launch_time"].cast<double>(),
-            py_p["initial_angle"].cast<double>(),
-            py_vector3d(py_p["angular_velocity"]),
-            py_p["mu"].cast<double>(),
-            py_p["pitch_time"].cast<double>(),
-            py_p["pitch_duration"].cast<double>(),
-            py_p["pitch_rate"].cast<double>(),
-            py_p["azimuth"].cast<double>(),
-            py_p["a_limit"].cast<double>(),
-            0.0,
+            py_p["body"]["mu"].cast<double>(),
+            py_p["body"]["initial_rotation"].cast<double>(),
+            py_vector3d(py_p["body"]["angular_velocity"]),
+            py_p["settings"]["a_limit"].cast<double>(),
+            py_p["settings"]["launch_time"].cast<double>(),
+            py_p["settings"]["azimuth"].cast<double>(),
+            py_p["settings"]["pitch_time"].cast<double>(),
+            py_p["settings"]["pitch_duration"].cast<double>(),
+            py_p["settings"]["pitch_rate"].cast<double>(),
+            py_p["settings"]["switch_altitude"].cast<double>(),
+            py_spl(py_p["splines"]["pressure"]),
+            py_spl(py_p["splines"]["density"]),
+            py_spl(py_p["splines"]["drag"]),
+            py_spl(py_p["splines"]["drag_mul"]),
             Spl(),
-            py_spl(py_p["spl_pressure"]),
-            py_spl(py_p["spl_density"]),
-            py_spl(py_p["spl_drag"]),
-            py_spl(py_p["spl_drag_mul"]),
-            Result()
+            0.0,
+            0.0,
+            Eigen::Vector3d(),
+            Eigen::Vector3d(),
+            Eigen::Vector3d(),
+            Eigen::Vector3d()
         };
 
-        double t = 0.0;
-        double* y_ptr = py_arr_ptr(py_p["yi"]);
-        py::list events = py_p["events"];
-        double relerr = py_p["relerr"].cast<double>();
-        double abserr = py_p["abserr"].cast<double>();
-
-        for (size_t i = 0; i < events.size(); i++)
+        for (size_t i = 0; i < py_events.size(); i++)
         {
-            py::tuple event = events[i];
-            double tout = event.attr("tout").cast<double>();
+            py::tuple event = py_events[i];
             bool stage = event.attr("stage").cast<bool>();
+            double tout = event.attr("tout").cast<double>();
             double mf = event.attr("mf").cast<double>();
             atm_params.mass_rate = event.attr("mdot").cast<double>();
             atm_params.thrust = event.attr("spl_thrust").is_none() ? Spl() : py_spl(event[6]);
 
             if (stage) { y_ptr[6] = mf; }
 
-            Equation eq = Equation(atm_state_, 7, y_ptr, t, relerr, abserr, &atm_params);
+            Equation eq = Equation(atm_state, 7, y_ptr, t, relerr, abserr, &atm_params);
 
             int steps = int(tout - t) + 1;
             double dt = (tout - t) / steps;
             double altitude = sqrt(y_ptr[0] * y_ptr[0] + y_ptr[1] * y_ptr[1] + y_ptr[2] * y_ptr[2]);
             double altitude_old = altitude;
-            double switch_altitude = py_p["switch_altitude"].cast<double>();
 
             for (size_t j = 0; j < steps + 1; j++)
             {
@@ -1319,19 +1319,20 @@ namespace kerbal_guidance_system
                 eq.get_y(0, 7, y_ptr);
                 altitude_old = altitude;
                 altitude = sqrt(y_ptr[0] * y_ptr[0] + y_ptr[1] * y_ptr[1] + y_ptr[2] * y_ptr[2]);
-                if (output && altitude < switch_altitude)
+
+                if (output && altitude < atm_params.switch_altitude)
                 {
-                    output_atm_(y_ptr, atm_params, eq, output);
+                    output_atm(eq.get_t(), y_ptr, atm_params, output);
                 }
                 if (altitude < altitude_old)
                 {
                     throw std::runtime_error("Switch altitude not reached: negative altitude rate.");
                 }
-                if (altitude > switch_altitude)
+                if (altitude > atm_params.switch_altitude)
                 {
                     for (size_t iter = 0; iter < 10; iter++)
                     {
-                        double f = altitude - switch_altitude;
+                        double f = altitude - atm_params.switch_altitude;
                         double df = (altitude - altitude_old) / dt;
                         dt = -f / df;
                         eq.step(eq.get_t() + dt);
@@ -1342,24 +1343,22 @@ namespace kerbal_guidance_system
                         {
                             if (output)
                             {
-                                output_atm_(y_ptr, atm_params, eq, output);
+                                output_atm(eq.get_t(), y_ptr, atm_params, output);
                             }
-
-                            double angle = atm_params.initial_angle + (eq.get_t() + atm_params.launch_time - atm_params.initial_time) * atm_params.angular_velocity.norm();
+                            t = eq.get_t();
+                            double angle = atm_params.initial_rotation + (t + atm_params.launch_time) * atm_params.angular_velocity.norm();
                             Eigen::Vector3d axis = atm_params.angular_velocity.normalized();
+                            Eigen::Map<Eigen::Vector3d> r(y_ptr);
+                            Eigen::Map<Eigen::Vector3d> v(y_ptr + 3);
                             Eigen::AngleAxisd rotation = Eigen::AngleAxisd(angle, axis);
-
-                            Eigen::Vector3d r = rotation * Eigen::Vector3d(eq.get_y(0), eq.get_y(1), eq.get_y(2));
-                            Eigen::Vector3d v = rotation * Eigen::Vector3d(eq.get_y(3), eq.get_y(4), eq.get_y(5)) + atm_params.angular_velocity.cross(r);
-
-                            y_ptr[0] = r(0);
-                            y_ptr[1] = r(1);
-                            y_ptr[2] = r(2);
-                            y_ptr[3] = v(0);
-                            y_ptr[4] = v(1);
-                            y_ptr[5] = v(2);
-
-                            return eq.get_t();
+                            r = rotation * r;
+                            v = rotation * v + atm_params.angular_velocity.cross(r);
+                            for (size_t i = 0; i < 3; i++)
+                            {
+                                y_ptr[i] = r[i];
+                                y_ptr[i + 3] = v[i];
+                            }
+                            return;
                         }
                     }
                     throw std::runtime_error("Switch altitude not reached: refinement iterations exceeded.");
@@ -1370,30 +1369,25 @@ namespace kerbal_guidance_system
         throw std::runtime_error("Switch altitude not reached: events completed.");
     }
 
-    bool simulate_vac_phase(double t, py::dict py_p, std::vector<double>* output)
+    static void simulate_vac_phase_(double& t, double* y_ptr, py::list py_events, py::dict py_p, double relerr, double abserr, std::vector<double>* output)
     {
-        VacParams vac_params{
-            py_p["ndim_time"].cast<double>(),
-            py_p["ndim_distance"].cast<double>(),
-            py_p["ndim_velocity"].cast<double>(),
-            py_p["ndim_acceleration"].cast<double>(),
-            t / py_p["ndim_time"].cast<double>(),
-            py_p["a_limit"].cast<double>() / py_p["ndim_acceleration"].cast<double>(),
+        VacParams vac_params = {
+            py_p["ndim"]["time"].cast<double>(),
+            py_p["ndim"]["distance"].cast<double>(),
+            py_p["ndim"]["velocity"].cast<double>(),
+            py_p["ndim"]["acceleration"].cast<double>(),
+            py_p["settings"]["a_limit"].cast<double>(),
+            t / py_p["ndim"]["time"].cast<double>(),
+            py_vector3d(py_p["settings"]["x"]),
+            py_vector3d(py_p["settings"]["x"], 3),
             0.0,
             0.0,
-            py_vector3d(py_p["x"]),
-            py_vector3d(py_p["x"], 3),
-            Result()
+            0.0,
+            Eigen::Vector3d(),
+            Eigen::Vector3d()
         };
 
-        py::list events = py_p["events"];
-        double relerr = py_p["relerr"].cast<double>();
-        double abserr = py_p["abserr"].cast<double>();
-
-        bool last = false;
         t /= vac_params.ndim_time;
-        double tf = t + py_p["x"].cast<py::array_t<double>>().at(6);
-        double* y_ptr = py_arr_ptr(py_p["yi"]);
         y_ptr[0] /= vac_params.ndim_distance;
         y_ptr[1] /= vac_params.ndim_distance;
         y_ptr[2] /= vac_params.ndim_distance;
@@ -1401,123 +1395,321 @@ namespace kerbal_guidance_system
         y_ptr[4] /= vac_params.ndim_velocity;
         y_ptr[5] /= vac_params.ndim_velocity;
 
-        for (size_t i = 0; i < events.size(); i++)
+        bool vf_flag = !py_p["settings"]["vf"].is_none();
+        bool last = false;
+
+        for (size_t i = 0; i < py_events.size(); i++)
         {
-            py::tuple event = events[i];
-            double tout = event.attr("tout").cast<double>() / vac_params.ndim_time;
+            py::tuple event = py_events[i];
             bool stage = event.attr("stage").cast<bool>();
+            double tout = event.attr("tout").cast<double>() / vac_params.ndim_time;
             double mf = event.attr("mf").cast<double>();
             vac_params.mass_rate = event.attr("mdot").cast<double>() * vac_params.ndim_time;
             vac_params.thrust = event.attr("thrust_vac").cast<double>() / vac_params.ndim_acceleration;
 
             if (tout < t) { continue; }
             if (stage) { y_ptr[6] = mf; }
-            if (tout > tf) {
-                tout = tf;
-                last = true;
-            }
 
-            Equation eq = Equation(vac_state_, 7, y_ptr, t, relerr, abserr, &vac_params);
+            Equation eq = Equation(vac_state, 7, y_ptr, t, relerr, abserr, &vac_params);
 
-            if (output)
+            if (vf_flag)
             {
                 int steps = int(vac_params.ndim_time * (tout - t)) + 1;
                 double dt = (tout - t) / steps;
-
+                double velocity = sqrt(y_ptr[3] * y_ptr[3] + y_ptr[4] * y_ptr[4] + y_ptr[5] * y_ptr[5]);
+                double velocity_old = velocity;
                 for (size_t j = 0; j < steps + 1; j++)
                 {
                     eq.step(t + j * dt);
                     eq.get_y(0, 7, y_ptr);
-                    output_vac_(y_ptr, vac_params, eq, output);
+                    velocity_old = velocity;
+                    velocity = sqrt(y_ptr[3] * y_ptr[3] + y_ptr[4] * y_ptr[4] + y_ptr[5] * y_ptr[5]);
+
+                    if (velocity > py_p["settings"]["vf"].cast<double>() / vac_params.ndim_velocity)
+                    {
+                        for (size_t iter = 0; iter < 10; iter++)
+                        {
+                            double f = velocity - py_p["settings"]["vf"].cast<double>() / vac_params.ndim_velocity;
+                            double df = (velocity - velocity_old) / dt;
+                            dt = -f / df;
+                            eq.step(eq.get_t() + dt);
+                            eq.get_y(0, 7, y_ptr);
+                            velocity_old = velocity;
+                            velocity = sqrt(y_ptr[3] * y_ptr[3] + y_ptr[4] * y_ptr[4] + y_ptr[5] * y_ptr[5]);
+                            if (abs(dt) < abserr)
+                            {
+                                t = eq.get_t();
+                                t *= vac_params.ndim_time;
+                                for (size_t i = 0; i < 3; i++)
+                                {
+                                    y_ptr[i] = y_ptr[i] * vac_params.ndim_distance;
+                                    y_ptr[i + 3] = y_ptr[i + 3] * vac_params.ndim_velocity;
+                                }
+                                return;
+                            }
+                        }
+                        throw std::runtime_error("Final velocity not reached: refinement iterations exceeded.");
+                    }
                 }
             }
             else
             {
-                eq.step(tout);
-            }
+                if (tout > py_p["settings"]["x"].cast<py::array_t<double>>().at(6)) {
+                    tout = py_p["settings"]["x"].cast<py::array_t<double>>().at(6);
+                    last = true;
+                }
 
-            t = tout;
+                if (output)
+                {
+                    int steps = int(vac_params.ndim_time * (tout - t)) + 1;
+                    double dt = (tout - t) / steps;
+                    for (size_t j = 0; j < steps + 1; j++)
+                    {
+                        eq.step(t + j * dt);
+                        eq.get_y(0, 7, y_ptr);
+                        output_vac(y_ptr, vac_params, eq, output);
+                    }
+                }
+                else
+                {
+                    eq.step(tout);
+                    eq.get_y(0, 7, y_ptr);
+                }
+                t = tout;
+                if (last)
+                {
+                    t *= vac_params.ndim_time;
+                    for (size_t i = 0; i < 3; i++)
+                    {
+                        y_ptr[i] = y_ptr[i] * vac_params.ndim_distance;
+                        y_ptr[i + 3] = y_ptr[i + 3] * vac_params.ndim_velocity;
+                    }
+                    return;
+                }
+            }
         }
+        throw std::runtime_error("Simulate vacuum phase failed to complete.");
     }
 
-    void output_time_series(py::dict py_p)
+    //static void simulate_vac_phase(double& t, double* y_ptr, py::list py_events, py::dict py_p, double relerr, double abserr, std::vector<double>* output)
+    //{
+    //    VacParams vac_params = {
+    //        py_p["ndim"]["time"].cast<double>(),
+    //        py_p["ndim"]["distance"].cast<double>(),
+    //        py_p["ndim"]["velocity"].cast<double>(),
+    //        py_p["ndim"]["acceleration"].cast<double>(),
+    //        py_p["settings"]["a_limit"].cast<double>(),
+    //        t / py_p["ndim"]["time"].cast<double>(),
+    //        py_vector3d(py_p["settings"]["x"]),
+    //        py_vector3d(py_p["settings"]["x"], 3),
+    //        0.0,
+    //        0.0,
+    //        0.0,
+    //        Eigen::Vector3d(),
+    //        Eigen::Vector3d()
+    //    };
+
+    //    t /= vac_params.ndim_time;
+    //    y_ptr[0] /= vac_params.ndim_distance;
+    //    y_ptr[1] /= vac_params.ndim_distance;
+    //    y_ptr[2] /= vac_params.ndim_distance;
+    //    y_ptr[3] /= vac_params.ndim_velocity;
+    //    y_ptr[4] /= vac_params.ndim_velocity;
+    //    y_ptr[5] /= vac_params.ndim_velocity;
+
+    //    bool last = false;
+    //    double tf = t + py_p["settings"]["x"].cast<py::array_t<double>>().at(6);
+    //        
+    //    for (size_t i = 0; i < py_events.size(); i++)
+    //    {
+    //        py::tuple event = py_events[i];
+    //        bool stage = event.attr("stage").cast<bool>();
+    //        double tout = event.attr("tout").cast<double>() / vac_params.ndim_time;
+    //        double mf = event.attr("mf").cast<double>();
+    //        vac_params.mass_rate = event.attr("mdot").cast<double>() * vac_params.ndim_time;
+    //        vac_params.thrust = event.attr("thrust_vac").cast<double>() / vac_params.ndim_acceleration;
+
+    //        if (tout < t) { continue; }
+    //        if (stage) { y_ptr[6] = mf; }
+
+
+    //        Equation eq = Equation(vac_state, 7, y_ptr, t, relerr, abserr, &vac_params);
+
+    //        if (tout > tf) {
+    //            tout = tf;
+    //            last = true;
+    //        }
+
+    //        if (output)
+    //        {
+    //            int steps = int(vac_params.ndim_time * (tout - t)) + 1;
+    //            double dt = (tout - t) / steps;
+    //            for (size_t j = 0; j < steps + 1; j++)
+    //            {
+    //                eq.step(t + j * dt);
+    //                eq.get_y(0, 7, y_ptr);
+    //                output_vac(y_ptr, vac_params, eq, output);
+    //            }
+    //        }
+    //        else
+    //        {
+    //            eq.step(tout);
+    //            eq.get_y(0, 7, y_ptr);
+    //        }
+    //        t = tout;
+    //        if (last)
+    //        {
+    //            t *= vac_params.ndim_time;
+    //            for (size_t i = 0; i < 3; i++)
+    //            {
+    //                y_ptr[i] = y_ptr[i] * vac_params.ndim_distance;
+    //                y_ptr[i + 3] = y_ptr[i + 3] * vac_params.ndim_velocity;
+    //            }
+    //            return;
+    //        }
+    //    }
+    //}
+
+    //static void simulate_vac_phase_velocity(double& t, double* y_ptr, double vf, py::list py_events, py::dict py_p, double relerr, double abserr)
+    //{
+    //    VacParams vac_params = {
+    //        py_p["ndim"]["time"].cast<double>(),
+    //        py_p["ndim"]["distance"].cast<double>(),
+    //        py_p["ndim"]["velocity"].cast<double>(),
+    //        py_p["ndim"]["acceleration"].cast<double>(),
+    //        py_p["settings"]["a_limit"].cast<double>(),
+    //        t / py_p["ndim"]["time"].cast<double>(),
+    //        py_vector3d(py_p["settings"]["x"]),
+    //        py_vector3d(py_p["settings"]["x"], 3),
+    //        0.0,
+    //        0.0,
+    //        0.0,
+    //        Eigen::Vector3d(),
+    //        Eigen::Vector3d()
+    //    };
+
+    //    t /= vac_params.ndim_time;
+    //    y_ptr[0] /= vac_params.ndim_distance;
+    //    y_ptr[1] /= vac_params.ndim_distance;
+    //    y_ptr[2] /= vac_params.ndim_distance;
+    //    y_ptr[3] /= vac_params.ndim_velocity;
+    //    y_ptr[4] /= vac_params.ndim_velocity;
+    //    y_ptr[5] /= vac_params.ndim_velocity;
+
+    //    for (size_t i = 0; i < py_events.size(); i++)
+    //    {
+    //        py::tuple event = py_events[i];
+    //        bool stage = event.attr("stage").cast<bool>();
+    //        double tout = event.attr("tout").cast<double>() / vac_params.ndim_time;
+    //        double mf = event.attr("mf").cast<double>();
+    //        vac_params.mass_rate = event.attr("mdot").cast<double>() * vac_params.ndim_time;
+    //        vac_params.thrust = event.attr("thrust_vac").cast<double>() / vac_params.ndim_acceleration;
+
+    //        if (tout < t) { continue; }
+    //        if (stage) { y_ptr[6] = mf; }
+
+    //        Equation eq = Equation(vac_state, 7, y_ptr, t, relerr, abserr, &vac_params);
+
+    //        int steps = int(vac_params.ndim_time * (tout - t)) + 1;
+    //        double dt = (tout - t) / steps;
+    //        double velocity = sqrt(y_ptr[3] * y_ptr[3] + y_ptr[4] * y_ptr[4] + y_ptr[5] * y_ptr[5]);
+    //        double velocity_old = velocity;
+    //        for (size_t j = 0; j < steps + 1; j++)
+    //        {
+    //            eq.step(t + j * dt);
+    //            eq.get_y(0, 7, y_ptr);
+    //            velocity_old = velocity;
+    //            velocity = sqrt(y_ptr[3] * y_ptr[3] + y_ptr[4] * y_ptr[4] + y_ptr[5] * y_ptr[5]);
+
+    //            if (velocity > vf / vac_params.ndim_velocity)
+    //            {
+    //                for (size_t iter = 0; iter < 10; iter++)
+    //                {
+    //                    double f = velocity - vf / vac_params.ndim_velocity;
+    //                    double df = (velocity - velocity_old) / dt;
+    //                    dt = -f / df;
+    //                    eq.step(eq.get_t() + dt);
+    //                    eq.get_y(0, 7, y_ptr);
+    //                    velocity_old = velocity;
+    //                    velocity = sqrt(y_ptr[3] * y_ptr[3] + y_ptr[4] * y_ptr[4] + y_ptr[5] * y_ptr[5]);
+    //                    if (abs(dt) < abserr)
+    //                    {
+    //                        t = eq.get_t();
+    //                        t *= vac_params.ndim_time;
+    //                        for (size_t i = 0; i < 3; i++)
+    //                        {
+    //                            y_ptr[i] = y_ptr[i] * vac_params.ndim_distance;
+    //                            y_ptr[i + 3] = y_ptr[i + 3] * vac_params.ndim_velocity;
+    //                        }
+    //                        return;
+    //                    }       
+    //                }
+    //                throw std::runtime_error("Final velocity not reached: refinement iterations exceeded.");
+    //            }
+    //        }
+    //        t = tout;
+    //    }
+    //    throw std::runtime_error("Final velocity not reached: events completed.");
+    //}
+
+    py::tuple kgs_simulate_atm_phase(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_p, double relerr, double abserr)
     {
-        std::vector<double> output;
+        py::array_t<double> py_y = py_array_copy(py_yi);
+        double* y_ptr = py_arr_ptr(py_y);
 
-        double t = simulate_atm_phase(py_p, &output);
-        simulate_vac_phase(t, py_p, &output);
+        simulate_atm_phase(t, y_ptr, py_events, py_p, relerr, abserr, nullptr);
 
-        for (int i = 0; i < output.size() / 17; i++)
-        {
-            for (int j = 0; j < 17; j++)
-            {
-                std::cout << std::setprecision(17) << output[17 * i + j] << ", ";
-            }
-            std::cout << '\n';
-        }
+        return py::make_tuple(t, py_y);
     }
 
-    py::array_t<double> constraint_residuals(double t, py::array_t<double> py_x, py::array_t<double> py_y, py::array_t<double> py_p, py::array_t<double> py_c, double a_limit, double abserr, double relerr)
+    py::tuple kgs_simulate_vac_phase(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_p, double relerr, double abserr)
     {
-        double* x_ptr = py_x.mutable_data();
-        double* y_ptr = py_y.mutable_data();
-        double* p_ptr = py_p.mutable_data();
-        double* c_ptr = py_c.mutable_data();
-        py::buffer_info p_info = py_p.request();
+        py::array_t<double> py_y = py_array_copy(py_yi);
 
-        bool last = false;
-        double tf = t + x_ptr[6];
+        double* y_ptr = py_arr_ptr(py_y);
 
-        Eigen::Vector3d lambda_i = { x_ptr[0], x_ptr[1], x_ptr[2] };
-        Eigen::Vector3d lambda_dot_i = { x_ptr[3], x_ptr[4], x_ptr[5] };
+        simulate_vac_phase_(t, y_ptr, py_events, py_p, relerr, abserr, nullptr);
 
-        VacParams p{
-            py_p["ndim_time"].cast<double>(),
-            py_p["ndim_distance"].cast<double>(),
-            py_p["ndim_velocity"].cast<double>(),
-            py_p["ndim_acceleration"].cast<double>(),
-            t / py_p["ndim_time"].cast<double>(),
-            py_p["a_limit"].cast<double>() / py_p["ndim_acceleration"].cast<double>(),
-            0.0,
-            0.0,
-            py_vector3d(py_p["x"]),
-            py_vector3d(py_p["x"], 3),
-            Result()
-        };
+        return py::make_tuple(t, py_y);
+    }
 
-        for (size_t i = 0; i < p_info.shape[0]; i++)
-        {
-            double tout = p_ptr[4 * i + 0];
-            double mf = p_ptr[4 * i + 1];
-            p.mass_rate = p_ptr[4 * i + 2];
-            p.thrust = p_ptr[4 * i + 3];
+    py::tuple kgs_simulate_vac_phase_velocity(double t, py::array_t<double> py_yi, double vf, py::list py_events, py::dict py_p, double relerr, double abserr)
+    {
+        py::array_t<double> py_y = py_array_copy(py_yi);
 
-            if (tout < t) { continue; }
-            if (mf > 0) { y_ptr[6] = mf; }
-            if (tout > tf) {
-                tout = tf;
-                last = true;
-            }
+        double* y_ptr = py_arr_ptr(py_y);
 
-            Equation eq = Equation(vac_state_, 7, y_ptr, t, relerr, abserr, &p);
-            eq.step(tout);
-            eq.get_y(0, 7, y_ptr);
+        simulate_vac_phase_(t, y_ptr, py_events, py_p, relerr, abserr, nullptr);
 
-            t = tout;
+        return py::make_tuple(t, py_y);
+    }
 
-            if (last) { break; }
-        }
+    py::array_t<double> kgs_constraint_residuals(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_p, double relerr, double abserr)
+    {
+        py::array_t<double> py_y = py_array_copy(py_yi);
+
+        double* y_ptr = py_arr_ptr(py_y);
+
+        simulate_vac_phase_(t, y_ptr, py_events, py_p, relerr, abserr, nullptr);
+
+
+        Eigen::Vector3d lambda_i = py_vector3d(py_p["settings"]["x"]);
+        Eigen::Vector3d lambda_dot_i = py_vector3d(py_p["settings"]["x"], 3);
 
         py::array_t<double> f({ 1, 7 });
         f = f.reshape({ 7 });
         double* f_ptr = f.mutable_data();
 
-        Eigen::Vector3d rf = { y_ptr[0], y_ptr[1], y_ptr[2] };
-        Eigen::Vector3d vf = { y_ptr[3], y_ptr[4], y_ptr[5] };
+        Eigen::Vector3d rf = Eigen::Vector3d(y_ptr) / py_p["ndim"]["distance"].cast<double>();
+        Eigen::Vector3d vf = Eigen::Vector3d(y_ptr + 3) / py_p["ndim"]["velocity"].cast<double>();
+        double tf = py_p["settings"]["x"].cast<py::array_t<double>>().at(6);
 
-        Eigen::Vector3d lambda_f = lambda_i * cos(x_ptr[6]) + lambda_dot_i * sin(x_ptr[6]);
-        Eigen::Vector3d lambda_dot_f = -lambda_i * sin(x_ptr[6]) + lambda_dot_i * cos(x_ptr[6]);
+        Eigen::Vector3d lambda_f = lambda_i * cos(tf) + lambda_dot_i * sin(tf);
+        Eigen::Vector3d lambda_dot_f = -lambda_i * sin(tf) + lambda_dot_i * cos(tf);
         Eigen::Vector3d sigma = rf.cross(lambda_dot_f) - vf.cross(lambda_f);
+
+        py::array_t<double> c = py_p["settings"]["c"].cast<py::array_t<double>>();
+        double* c_ptr = c.mutable_data();
 
         f_ptr[0] = rf.dot(rf) - c_ptr[0];
         f_ptr[1] = vf.dot(vf) - c_ptr[1];
@@ -1528,6 +1720,27 @@ namespace kerbal_guidance_system
         f_ptr[6] = lambda_dot_f.norm() - 1.0;
 
         return f;
+    }
+
+    py::array_t<double> kgs_output_time_series(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_p_atm, py::dict py_p_vac, double relerr, double abserr)
+    {
+        std::vector<double> output;
+
+        py::array_t<double> py_y = py_array_copy(py_yi);
+        double* y_ptr = py_arr_ptr(py_y);
+
+        simulate_atm_phase(t, y_ptr, py_events, py_p_atm, relerr, abserr, &output);
+        simulate_vac_phase_(t, y_ptr, py_events, py_p_vac, relerr, abserr, &output);
+
+        py::array_t<double> py_output({ int(output.size() / 20) , 20 });
+        double* output_ptr = py_output.mutable_data();
+
+        for (int i = 0; i < output.size(); i++)
+        {
+            output_ptr[i] = output[i];
+        }
+
+        return py_output;
     }
 }
 

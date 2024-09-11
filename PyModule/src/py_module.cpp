@@ -23,12 +23,17 @@ PYBIND11_MODULE(ksplib, m) {
 
     // kerbal guidance system functions
     py::module_ sm_kgs = m.def_submodule("kgs", "kerbal guidance system module");
-    sm_kgs.def("solve_atm_ivp", &kerbal_guidance_system::solve_atm_ivp, "t"_a, "tout"_a, "y"_a, "p"_a);
-    sm_kgs.def("solve_vac_ivp", &kerbal_guidance_system::solve_vac_ivp, "t"_a, "tout"_a, "y"_a, "p"_a);
-    sm_kgs.def("output_atm_ivp", &kerbal_guidance_system::output_atm_ivp, "t"_a, "tout"_a, "steps"_a, "y"_a, "p"_a);
-    sm_kgs.def("output_vac_ivp", &kerbal_guidance_system::output_vac_ivp, "t"_a, "tout"_a, "steps"_a, "y"_a, "p"_a);
-    sm_kgs.def("constraint_residuals", &kerbal_guidance_system::constraint_residuals, "t"_a, "x"_a, "y"_a, "p"_a, "c"_a, "a_limit"_a, "relerr"_a, "abserr"_a);
-    sm_kgs.def("output_time_series", &kerbal_guidance_system::output_time_series, "p"_a);
+    sm_kgs.def("constraint_residuals", &kerbal_guidance_system::kgs_constraint_residuals, "t"_a, "yi"_a, "events"_a, "p"_a, "relerr"_a, "abserr"_a);
+    sm_kgs.def("simulate_atm_phase", &kerbal_guidance_system::kgs_simulate_atm_phase, "t"_a, "yi"_a, "events"_a, "p"_a, "relerr"_a, "abserr"_a);
+    sm_kgs.def("simulate_vac_phase", &kerbal_guidance_system::kgs_simulate_vac_phase, "t"_a, "yi"_a, "events"_a, "p"_a, "relerr"_a, "abserr"_a);
+    sm_kgs.def("output_time_series", &kerbal_guidance_system::kgs_output_time_series, "t"_a, "yi"_a, "events"_a, "p_atm"_a, "p_vac"_a, "relerr"_a, "abserr"_a);
+
+    //sm_kgs.def("solve_atm_ivp", &kerbal_guidance_system::solve_atm_ivp, "t"_a, "tout"_a, "y"_a, "p"_a);
+    //sm_kgs.def("solve_vac_ivp", &kerbal_guidance_system::solve_vac_ivp, "t"_a, "tout"_a, "y"_a, "p"_a);
+    //sm_kgs.def("output_atm_ivp", &kerbal_guidance_system::output_atm_ivp, "t"_a, "tout"_a, "steps"_a, "y"_a, "p"_a);
+    //sm_kgs.def("output_vac_ivp", &kerbal_guidance_system::output_vac_ivp, "t"_a, "tout"_a, "steps"_a, "y"_a, "p"_a);
+    //sm_kgs.def("constraint_residuals", &kerbal_guidance_system::constraint_residuals, "t"_a, "x"_a, "y"_a, "p"_a, "c"_a, "a_limit"_a, "relerr"_a, "abserr"_a);
+    //sm_kgs.def("output_time_series", &kerbal_guidance_system::output_time_series, "p"_a);
     // sm_kgs.def("solve_orbit_burn", &kerbal_guidance_system::solve_orbit_burn, "t"_a, "tout"_a, "y"_a, "p"_a);
 
     // flight plan functions
