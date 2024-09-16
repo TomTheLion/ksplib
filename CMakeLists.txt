@@ -10,7 +10,9 @@ include_directories(C:/dev/includes/eigen)
 include_directories(C:/dev/includes/nlopt-2.7.1/src/api)
 include_directories(nlopt)
 
-include_directories(Equation/src)
+# include_directories(Equation/src)
+# include_directories(EquationRK/src)
+include_directories(EquationALL/src)
 include_directories(Jdate/src)
 include_directories(Ephemeris/src)
 include_directories(Orbit/src)
@@ -28,6 +30,16 @@ include_directories(testing/src)
 
 add_executable(
 	testing
+	# Equation/src/ode.cpp
+	# Equation/src/Equation.cpp
+	EquationAll/src/dopr5.cpp
+	EquationAll/src/Equation.cpp
+	testing/src/testing2024.cpp
+)
+
+#[[
+add_executable(
+	testing
 	nlopt/nlopt.hpp
 	Equation/src/Ode.cpp
 	Equation/src/Equation.cpp
@@ -42,6 +54,7 @@ add_executable(
 )
 
 target_link_libraries(testing PRIVATE C:/dev/includes/nlopt-2.7.1_build/Release/nlopt.lib)
+
 
 pybind11_add_module(
 	ksplib
@@ -61,7 +74,7 @@ pybind11_add_module(
 )
 
 target_link_libraries(ksplib PRIVATE C:/dev/includes/nlopt-2.7.1_build/Release/nlopt.lib)
-
+]]
 
 #[[
 add_subdirectory(pybind11)
