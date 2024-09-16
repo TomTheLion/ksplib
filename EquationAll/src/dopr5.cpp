@@ -128,7 +128,7 @@ namespace dopr5
 		}
 		else if (iflag == 2 && in_range(tout, tt, tw))
 		{
-			intrp(t, tout, y, yp, neqn, tt, d * hh, pwork + ir1, pwork + ir2, pwork + ir3, pwork + ir4, pwork + ir5);
+			intrp(t, tout, y, yp, neqn, tt, tw, pwork + ir1, pwork + ir2, pwork + ir3, pwork + ir4, pwork + ir5);
 			// std::cout << "intrp\n";
 			return;
 		}
@@ -153,13 +153,13 @@ namespace dopr5
 				iflag = 2;
 				double temp = tt;
 				tt = tw;
-				tw = tt;
+				tw = temp;
 				for (int i = 0; i < neqn; i++)
 				{
 					work[iyy + i] = work[iyw + i];
 					work[iyyp + i] = work[ik7 + i];
 				}
-				intrp(t, tout, y, yp, neqn, tt, d * hh, pwork + ir1, pwork + ir2, pwork + ir3, pwork + ir4, pwork + ir5);
+				intrp(t, tout, y, yp, neqn, tt, tw, pwork + ir1, pwork + ir2, pwork + ir3, pwork + ir4, pwork + ir5);
 				// std::cout << "step\n";
 				return;
 			}
@@ -350,7 +350,7 @@ namespace dopr5
 		std::vector<double>& yp,
 		int neqn,
 		double tt,
-		double h,
+		double tw,
 		double* r1,
 		double* r2,
 		double* r3,
@@ -359,7 +359,8 @@ namespace dopr5
 	)
 	{
 		t = tout;
-		double s = (tout - tt) / h + 1.0;
+		double h = (tt - tw);
+		double s = (tout - tw) / h;
 		double s1 = 1.0 - s;
 		double s2 = s1 - s;
 		double s3 = s * (s1 + s2);

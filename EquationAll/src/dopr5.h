@@ -87,7 +87,7 @@ namespace dopr5
 		std::vector<double>& yp,
 		int neqn,
 		double tt,
-		double h,
+		double tw,
 		double* r1,
 		double* r2,
 		double* r3,
