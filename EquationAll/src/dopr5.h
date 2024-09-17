@@ -1,5 +1,4 @@
 #include <vector>
-#include <string>
 
 namespace dopr5
 {
@@ -8,12 +7,13 @@ namespace dopr5
 		int& iflag,
 		int neqn,
 		double t,
-		const std::vector<double>& y,
+		std::vector<double>& y,
 		std::vector<double>& yp,
 		std::vector<int>& iwork,
 		std::vector<double>& work,
 		void* params);
 	void step(
+		void f(double t, double y[], double yp[], void* params),
 		int max_iter,
 		int& iflag,
 		int neqn,
@@ -21,18 +21,16 @@ namespace dopr5
 		double abstol,
 		double& t,
 		double tout,
-		std::vector<int>& iwork,
-		std::vector<double>& work,
 		std::vector<double>& y,
 		std::vector<double>& yp,
-		void* params,
-		void f(double t, double y[], double yp[], void* params));
-	void stepn(int neqn, double tout);
+		std::vector<int>& iwork,
+		std::vector<double>& work,
+		void* params);
 	void dy(
 		void f(double t, double y[], double yp[], void* params),
 		int neqn,
-		double tt,
 		double h,
+		double tt,
 		double* yy,
 		double* yyp,
 		double* yw,
@@ -43,8 +41,13 @@ namespace dopr5
 		double* k6,
 		double* k7,
 		void* params);
-
-	void initial_step_size(int neqn, double& hh, double reltol, double abstol, double* yy, double* yyp);
+	void initial_step_size(
+		int neqn,
+		double reltol,
+		double abstol,
+		double& hh,
+		double* yy,
+		double* yyp);
 	void update_step_size(
 		int neqn,
 		double reltol,
@@ -81,18 +84,16 @@ namespace dopr5
 		double* r5
 	);
 	void intrp(
+		int neqn,
 		double& t,
 		double tout,
 		std::vector<double>& y,
 		std::vector<double>& yp,
-		int neqn,
 		double tt,
 		double tw,
 		double* r1,
 		double* r2,
 		double* r3,
 		double* r4,
-		double* r5
-	);
-	std::string get_error_string();
+		double* r5);
 }

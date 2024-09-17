@@ -34,7 +34,7 @@ add_executable(
 	# Equation/src/Equation.cpp
 	EquationAll/src/dopr5.cpp
 	EquationAll/src/Equation.cpp
-	testing/src/testing2024.cpp
+	EquationAll/src/testing.cpp
 )
 
 #[[

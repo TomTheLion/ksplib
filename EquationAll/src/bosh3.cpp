@@ -1,6 +1,6 @@
-#include "dopr5.h"
+#include "bosh3.h"
 
-namespace dopr5
+namespace bosh3
 {
 	// Machine precision
 	constexpr double eps = 2.220446049250313E-016;
@@ -8,40 +8,21 @@ namespace dopr5
 	// Dormand-Prince coefficients
 
 	// Node coefficients
-	constexpr double c1 = 1.0 / 5.0;
-	constexpr double c2 = 3.0 / 10.0;
-	constexpr double c3 = 4.0 / 5.0;
-	constexpr double c4 = 8.0 / 9.0;
+	constexpr double c1 = 1.0 / 2.0;
+	constexpr double c2 = 3.0 / 4.0;
 
 	// Runge-Kutta matrix
-	constexpr double a11 = 1.0 / 5.0;
-	constexpr double a21 = 3.0 / 40.0;
-	constexpr double a22 = 9.0 / 40.0;
-	constexpr double a31 = 44.0 / 45.0;
-	constexpr double a32 = -56.0 / 15.0;
-	constexpr double a33 = 32.0 / 9.0;
-	constexpr double a41 = 19372.0 / 6561.0;
-	constexpr double a42 = -25360.0 / 2187.0;
-	constexpr double a43 = 64448.0 / 6561.0;
-	constexpr double a44 = -212.0 / 729.0;
-	constexpr double a51 = 9017.0 / 3168.0;
-	constexpr double a52 = -355.0 / 33.0;
-	constexpr double a53 = 46732.0 / 5247.0;
-	constexpr double a54 = 49.0 / 176.0;
-	constexpr double a55 = -5103.0 / 18656.0;
-	constexpr double a61 = 35.0 / 384.0;
-	constexpr double a63 = 500.0 / 1113.0;
-	constexpr double a64 = 125.0 / 192.0;
-	constexpr double a65 = -2187.0 / 6784.0;
-	constexpr double a66 = 11.0 / 84.0;
+	constexpr double a11 = 1.0 / 2.0;
+	constexpr double a22 = 3.0 / 4.0;
+	constexpr double a31 = 2.0 / 9.0;
+	constexpr double a32 = 1.0 / 3.0;
+	constexpr double a33 = 4.0 / 9.0;
 
 	// Error coefficients
-	constexpr double e1 = 71.0 / 57600.0;
-	constexpr double e3 = -71.0 / 16695.0;
-	constexpr double e4 = 71.0 / 1920.0;
-	constexpr double e5 = -17253.0 / 339200.0;
-	constexpr double e6 = 22.0 / 525.0;
-	constexpr double e7 = -1.0 / 40.0;
+	constexpr double e1 = -5.0 / 72.0;
+	constexpr double e2 = 1.0 / 12.0;
+	constexpr double e3 = 1.0 / 9.0;
+	constexpr double e4 = 1.0 / 8.0;
 
 	// Interpolation coefficients
 	constexpr double d1 = -12715105075.0 / 11282082432.0;
@@ -85,7 +66,7 @@ namespace dopr5
 		// set the size of yp and the internal workspace
 		yp.resize(neqn);
 		iwork.resize(1);
-		work.resize(5 + 14 * neqn);
+		work.resize(5 + 9 * neqn);
 		// set the initial value of errold, t, and internal copies of the problem state
 		// and its derivative
 		double& errold = work[0];
@@ -146,14 +127,9 @@ namespace dopr5
 		double* k2 = yw + neqn;
 		double* k3 = k2 + neqn;
 		double* k4 = k3 + neqn;
-		double* k5 = k4 + neqn;
-		double* k6 = k5 + neqn;
-		double* k7 = k6 + neqn;
-		double* r1 = k7 + neqn;
+		double* r1 = k4 + neqn;
 		double* r2 = r1 + neqn;
 		double* r3 = r2 + neqn;
-		double* r4 = r3 + neqn;
-		double* r5 = r4 + neqn;
 
 		// if integrator is in initial state, set initial stepsize
 		// if integrator was previously successful and tout falls within the last
@@ -164,7 +140,7 @@ namespace dopr5
 		}
 		else if (iflag == 2 && in_range(tout, tt, tw))
 		{
-			intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3, r4, r5);
+			intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3);
 			return;
 		}
 
@@ -181,8 +157,8 @@ namespace dopr5
 			}
 
 			// perform step then estimate error and update step size
-			dy(f, neqn, d * hh, tt, yy, yyp, yw, k2, k3, k4, k5, k6, k7, params);
-			update_step_size(neqn, reltol, abstol, reject, errold, d, hh, tt, tw, yy, yyp, yw, k3, k4, k5, k6, k7);
+			dy(f, neqn, d * hh, tt, yy, yyp, yw, k2, k3, k4, params);
+			update_step_size(neqn, reltol, abstol, reject, errold, d, hh, tt, tw, yy, yyp, yw, k3, k4);
 
 			// test if step was successful
 			if (reject)
@@ -195,16 +171,16 @@ namespace dopr5
 			{
 				// iflag of 2 indicates that integration was successful
 				iflag = 2;
-				dense(neqn, d * hh, yy, yyp, yw, k3, k4, k5, k6, k7, r1, r2, r3, r4, r5);
+				dense(neqn, d * hh, yy, yyp, yw, k3, k4, r1, r2, r3);
 				double temp = tt;
 				tt = tw;
 				tw = temp;
 				for (int i = 0; i < neqn; i++)
 				{
 					yy[i] = yw[i];
-					yyp[i] = k7[i];
+					yyp[i] = k4[i];
 				}
-				intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3, r4, r5);
+				intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3);
 				return;
 			}
 			else
@@ -213,7 +189,7 @@ namespace dopr5
 				for (int i = 0; i < neqn; i++)
 				{
 					yy[i] = yw[i];
-					yyp[i] = k7[i];
+					yyp[i] = k4[i];
 				}
 			}
 		}
@@ -243,9 +219,6 @@ namespace dopr5
 		double* k2,
 		double* k3,
 		double* k4,
-		double* k5,
-		double* k6,
-		double* k7,
 		void* params)
 	{
 		for (int i = 0; i < neqn; i++)
@@ -253,24 +226,12 @@ namespace dopr5
 		f(tt + c1 * h, yw, k2, params);
 
 		for (int i = 0; i < neqn; i++)
-			yw[i] = yy[i] + h * (a21 * yyp[i] + a22 * k2[i]);
+			yw[i] = yy[i] + h * (a22 * k2[i]);
 		f(tt + c2 * h, yw, k3, params);
 
 		for (int i = 0; i < neqn; i++)
 			yw[i] = yy[i] + h * (a31 * yyp[i] + a32 * k2[i] + a33 * k3[i]);
-		f(tt + c3 * h, yw, k4, params);
-
-		for (int i = 0; i < neqn; i++)
-			yw[i] = yy[i] + h * (a41 * yyp[i] + a42 * k2[i] + a43 * k3[i] + a44 * k4[i]);
-		f(tt + c4 * h, yw, k5, params);
-
-		for (int i = 0; i < neqn; i++)
-			yw[i] = yy[i] + h * (a51 * yyp[i] + a52 * k2[i] + a53 * k3[i] + a54 * k4[i] + a55 * k5[i]);
-		f(tt + h, yw, k6, params);
-
-		for (int i = 0; i < neqn; i++)
-			yw[i] = yy[i] + h * (a61 * yyp[i] + a63 * k3[i] + a64 * k4[i] + a65 * k5[i] + a66 * k6[i]);
-		f(tt + h, yw, k7, params);
+		f(tt * h, yw, k4, params);
 	}
 
 	// Estimates the initial step size
@@ -281,11 +242,11 @@ namespace dopr5
 	// yy = current state of the problem
 	// yyp = current derivative of problem
 	void initial_step_size(
-		int neqn, 
-		double reltol, 
-		double abstol, 
-		double& hh, 
-		double* yy, 
+		int neqn,
+		double reltol,
+		double abstol,
+		double& hh,
+		double* yy,
 		double* yyp)
 	{
 		double err = 0.0;
@@ -297,7 +258,7 @@ namespace dopr5
 			err += pow(ei / sci, 2.0);
 		}
 
-		hh = pow(err / neqn, -0.10);
+		hh = pow(err / neqn, -(1.0 / 6.0));
 	}
 
 	// Estimates error and calculates next step size
@@ -327,14 +288,12 @@ namespace dopr5
 		double* yy,
 		double* yyp,
 		double* yw,
+		double* k2,
 		double* k3,
-		double* k4,
-		double* k5,
-		double* k6,
-		double* k7)
+		double* k4)
 	{
 		// step size control parameters
-		const double alpha = 0.17;
+		const double alpha = 0.28;
 		const double beta = 0.03;
 		const double safe = 0.92;
 		const double min_scale = 0.2;
@@ -347,7 +306,7 @@ namespace dopr5
 		for (int i = 0; i < neqn; i++)
 		{
 			double sci = abstol + reltol * std::max(abs(yy[i]), abs(yw[i]));
-			double ei = hh * (e1 * yyp[i] + e3 * k3[i] + e4 * k4[i] + e5 * k5[i] + e6 * k6[i] + e7 * k7[i]);
+			double ei = hh * (e1 * yyp[i] + e2 * k2[i] + e3 * k3[i] + e4 * k4[i]);
 			err += pow(ei / sci, 2.0);
 		}
 
@@ -409,9 +368,7 @@ namespace dopr5
 		double* k7,
 		double* r1,
 		double* r2,
-		double* r3,
-		double* r4,
-		double* r5)
+		double* r3)
 	{
 		for (int i = 0; i < neqn; i++)
 		{
@@ -420,8 +377,6 @@ namespace dopr5
 			double bspl = h * yyp[i] - dy;
 			r2[i] = dy;
 			r3[i] = bspl;
-			r4[i] = dy - h * k7[i] - bspl;
-			r5[i] = h * (d1 * yyp[i] + d3 * k3[i] + d4 * k4[i] + d5 * k5[i] + d6 * k6[i] + d7 * k7[i]);
 		}
 	}
 
@@ -444,9 +399,7 @@ namespace dopr5
 		double tw,
 		double* r1,
 		double* r2,
-		double* r3,
-		double* r4,
-		double* r5)
+		double* r3)
 	{
 		t = tout;
 		double h = (tt - tw);
@@ -458,8 +411,8 @@ namespace dopr5
 
 		for (int i = 0; i < neqn; i++)
 		{
-			y[i] = r1[i] + s * (r2[i] + s1 * (r3[i] + s * (r4[i] + s1 * r5[i])));
-			yp[i] = 1.0 / h * (r2[i] + s2 * r3[i] + s3 * r4[i] + s4 * r5[i]);
+			y[i] = r1[i] + s * (r2[i] + s1 * (r3[i]));
+			yp[i] = 1.0 / h * (r2[i] + s2 * r3[i]);
 		}
 	}
 }

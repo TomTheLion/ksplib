@@ -8,7 +8,7 @@
 #include <string>
 
 class Equation
-{	
+{
 public:
 
 	// Create a default Equation object
@@ -27,7 +27,7 @@ public:
 		double t,
 		const std::vector<double>& y,
 		std::string method = "DOPR5",
-		double reltol = 1e-3,
+		double reltol = 1e-6,
 		double abstol = 1e-6,
 		void* params = nullptr);
 
@@ -43,11 +43,6 @@ public:
 	// Steps Equation until time is equal to tout
 	// tout = final desired integration time
 	void step(double tout);
-
-	// Steps Equation until time is equal to tout
-	// Prevents integrator from calling f where t > tout
-	// tout = final desired integration time
-	void stepn(double tout);
 
 	// Returns status of the integrator
 	int get_iflag() const;
@@ -84,7 +79,7 @@ public:
 private:
 
 	// Integrator method to be used
-	enum Method
+	enum class Method
 	{
 		NONE,
 		DOPR5,

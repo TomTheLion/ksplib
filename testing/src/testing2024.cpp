@@ -24,7 +24,7 @@ int main()
 	std::vector<double> y = { 1.0, 0.0, 0.0, 0.0, velocity, 0.0 };
 
 	Equation eq1 = Equation();
-	Equation eq2 = Equation(f, 0.0, y, "DOPR5", 1e-6, 1e-6);
+	Equation eq2 = Equation(f, 0.0, y, "DOPR5", 1e-10, 1e-10);
 
 	try
 	{

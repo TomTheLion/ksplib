@@ -5,7 +5,7 @@
 // Create a default Equation object
 Equation::Equation()
 {
-	method_ = NONE;
+	method_ = Method::NONE;
 	max_iter_ = 0;
 	iflag_ = 0;
 	neqn_ = 0;
@@ -34,14 +34,14 @@ Equation::Equation(
 	void* params)
 	: f_(f), t_(t), y_(y), reltol_(reltol), abstol_(abstol), params_(params)
 {
-	method_ = NONE;
+	method_ = Method::NONE;
 	max_iter_ = 0;
 	iflag_ = 0;
 	neqn_ = y.size();
 
 	if (method == "DOPR5")
 	{
-		method_ = DOPR5;
+		method_ = Method::DOPR5;
 		max_iter_ = 100000;
 		dopr5::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
 	}
@@ -112,34 +112,14 @@ Equation::~Equation()
 // tout = final desired integration time
 void Equation::step(double tout)
 {
-	double a;
 	switch (method_)
 	{
-	case DOPR5:
-		dopr5::step(max_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, iwork_, work_, y_, yp_, params_, f_);
+	case Method::DOPR5:
+		dopr5::step(f_, max_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
 		return;
-	case DOPR853:
+	case Method::DOPR853:
 		return;
-	case ODE:
-		return;
-	default:
-		return;
-	}
-}
-
-// Steps Equation until time is equal to tout
-// Prevents integrator from calling f where t > tout
-// tout = final desired integration time
-void Equation::stepn(double tout)
-{
-	switch (method_)
-	{
-	case DOPR5:
-		dopr5::stepn(neqn_, tout);
-		return;
-	case DOPR853:
-		return;
-	case ODE:
+	case Method::ODE:
 		return;
 	default:
 		return;
@@ -210,11 +190,11 @@ std::string Equation::get_error_string() const
 {
 	switch (method_)
 	{
-	case DOPR5:
-		return dopr5::get_error_string();
-	case DOPR853:
+	case Method::DOPR5:
 		return "";
-	case ODE:
+	case Method::DOPR853:
+		return "";
+	case Method::ODE:
 		return "";
 	default:
 		return "";
