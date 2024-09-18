@@ -1,5 +1,7 @@
 #include <iostream>
 #include "Equation.h"
+#include "adb2.h"
+#include "bosh3.h"
 #include "dopr5.h"
 
 // Create a default Equation object
@@ -39,7 +41,19 @@ Equation::Equation(
 	iflag_ = 0;
 	neqn_ = y.size();
 
-	if (method == "DOPR5")
+	if (method == "ADB2")
+	{
+		method_ = Method::ADB2;
+		max_iter_ = 100000;
+		adb2::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else if (method == "BOSH3")
+	{
+		method_ = Method::BOSH3;
+		max_iter_ = 100000;
+		bosh3::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else if (method == "DOPR5")
 	{
 		method_ = Method::DOPR5;
 		max_iter_ = 100000;
@@ -114,6 +128,12 @@ void Equation::step(double tout)
 {
 	switch (method_)
 	{
+	case Method::ADB2:
+		adb2::step(f_, max_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		return;
+	case Method::BOSH3:
+		bosh3::step(f_, max_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		return;
 	case Method::DOPR5:
 		dopr5::step(f_, max_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
 		return;
@@ -190,6 +210,10 @@ std::string Equation::get_error_string() const
 {
 	switch (method_)
 	{
+	case Method::ADB2:
+		return "";
+	case Method::BOSH3:
+		return "";
 	case Method::DOPR5:
 		return "";
 	case Method::DOPR853:

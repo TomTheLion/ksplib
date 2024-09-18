@@ -82,6 +82,8 @@ private:
 	enum class Method
 	{
 		NONE,
+		ADB2,
+		BOSH3,
 		DOPR5,
 		DOPR853,
 		ODE

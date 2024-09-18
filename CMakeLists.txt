@@ -32,6 +32,8 @@ add_executable(
 	testing
 	# Equation/src/ode.cpp
 	# Equation/src/Equation.cpp
+	EquationAll/src/adb2.cpp
+	EquationAll/src/bosh3.cpp
 	EquationAll/src/dopr5.cpp
 	EquationAll/src/Equation.cpp
 	EquationAll/src/testing.cpp

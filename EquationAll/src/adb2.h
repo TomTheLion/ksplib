@@ -1,6 +1,6 @@
 #include <vector>
 
-namespace bosh3
+namespace adb2
 {
 	void init(
 		void f(double t, double y[], double yp[], void* params),
@@ -33,10 +33,10 @@ namespace bosh3
 		double tt,
 		double* yy,
 		double* yyp,
+		double* yypp,
 		double* yw,
-		double* k2,
-		double* k3,
-		double* k4,
+		double* ypw,
+		double* yppw,
 		void* params);
 	void initial_step_size(
 		int neqn,
@@ -56,22 +56,16 @@ namespace bosh3
 		double tt,
 		double& tw,
 		double* yy,
-		double* yyp,
 		double* yw,
-		double* k2,
-		double* k3,
-		double* k4);
+		double* yppw);
 	void dense(
 		int neqn,
 		double* yy,
 		double* yyp,
-		double* k2,
-		double* k3,
-		double* k4,
+		double* yypp,
 		double* r1,
 		double* r2,
-		double* r3,
-		double* r4);
+		double* r3);
 	void intrp(
 		int neqn,
 		double& t,
@@ -82,6 +76,5 @@ namespace bosh3
 		double tw,
 		double* r1,
 		double* r2,
-		double* r3,
-		double* r4);
+		double* r3);
 }

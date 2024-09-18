@@ -5,8 +5,6 @@ namespace bosh3
 	// Machine precision
 	constexpr double eps = 2.220446049250313E-016;
 
-	// Dormand-Prince coefficients
-
 	// Node coefficients
 	constexpr double c1 = 1.0 / 2.0;
 	constexpr double c2 = 3.0 / 4.0;
@@ -19,18 +17,18 @@ namespace bosh3
 	constexpr double a33 = 4.0 / 9.0;
 
 	// Error coefficients
-	constexpr double e1 = -5.0 / 72.0;
-	constexpr double e2 = 1.0 / 12.0;
-	constexpr double e3 = 1.0 / 9.0;
+	constexpr double e1 = 5.0 / 72.0;
+	constexpr double e2 = -1.0 / 12.0;
+	constexpr double e3 = -1.0 / 9.0;
 	constexpr double e4 = 1.0 / 8.0;
 
 	// Interpolation coefficients
-	constexpr double d1 = -12715105075.0 / 11282082432.0;
-	constexpr double d3 = 87487479700.0 / 32700410799.0;
-	constexpr double d4 = -10690763975.0 / 1880347072.0;
-	constexpr double d5 = 701980252875.0 / 199316789632.0;
-	constexpr double d6 = -1453857185.0 / 822651844.0;
-	constexpr double d7 = 69997945.0 / 29380423.0;
+	constexpr double d21 = -4.0 / 3.0;
+	constexpr double d23 = 4.0 / 3.0;
+	constexpr double d24 = -1.0;
+	constexpr double d31 = 5.0 / 9.0;
+	constexpr double d32 = -2.0 / 3.0;
+	constexpr double d33 = -8.0 / 9.0;
 
 	// Tests if a value falls within a range
 	// a = value to be tested
@@ -66,13 +64,13 @@ namespace bosh3
 		// set the size of yp and the internal workspace
 		yp.resize(neqn);
 		iwork.resize(1);
-		work.resize(5 + 9 * neqn);
+		work.resize(5 + 10 * neqn);
 		// set the initial value of errold, t, and internal copies of the problem state
 		// and its derivative
 		double& errold = work[0];
 		double& tt = work[3];
 		double* yy = &work[5];
-		double* yyp = &work[5 + neqn];
+		double* yyp = yy + neqn;
 		errold = 1.0;
 		tt = t;
 		f(t, y.data(), yp.data(), params);
@@ -130,6 +128,7 @@ namespace bosh3
 		double* r1 = k4 + neqn;
 		double* r2 = r1 + neqn;
 		double* r3 = r2 + neqn;
+		double* r4 = r3 + neqn;
 
 		// if integrator is in initial state, set initial stepsize
 		// if integrator was previously successful and tout falls within the last
@@ -140,7 +139,7 @@ namespace bosh3
 		}
 		else if (iflag == 2 && in_range(tout, tt, tw))
 		{
-			intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3);
+			intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3, r4);
 			return;
 		}
 
@@ -158,7 +157,7 @@ namespace bosh3
 
 			// perform step then estimate error and update step size
 			dy(f, neqn, d * hh, tt, yy, yyp, yw, k2, k3, k4, params);
-			update_step_size(neqn, reltol, abstol, reject, errold, d, hh, tt, tw, yy, yyp, yw, k3, k4);
+			update_step_size(neqn, reltol, abstol, reject, errold, d, hh, tt, tw, yy, yyp, yw, k2, k3, k4);
 
 			// test if step was successful
 			if (reject)
@@ -171,7 +170,7 @@ namespace bosh3
 			{
 				// iflag of 2 indicates that integration was successful
 				iflag = 2;
-				dense(neqn, d * hh, yy, yyp, yw, k3, k4, r1, r2, r3);
+				dense(neqn, yy, yyp, k2, k3, k4, r1, r2, r3, r4);
 				double temp = tt;
 				tt = tw;
 				tw = temp;
@@ -180,7 +179,7 @@ namespace bosh3
 					yy[i] = yw[i];
 					yyp[i] = k4[i];
 				}
-				intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3);
+				intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3, r4);
 				return;
 			}
 			else
@@ -231,7 +230,7 @@ namespace bosh3
 
 		for (int i = 0; i < neqn; i++)
 			yw[i] = yy[i] + h * (a31 * yyp[i] + a32 * k2[i] + a33 * k3[i]);
-		f(tt * h, yw, k4, params);
+		f(tt + h, yw, k4, params);
 	}
 
 	// Estimates the initial step size
@@ -352,31 +351,26 @@ namespace bosh3
 	// h = current step size with direction
 	// yy = current state of the problem
 	// yyp = current derivative of problem
-	// yw = working state of the problem
 	// k = Runge-kutta slope estimates
 	// r = dense output coefficients
 	void dense(
 		int neqn,
-		double h,
 		double* yy,
 		double* yyp,
-		double* yw,
+		double* k2,
 		double* k3,
 		double* k4,
-		double* k5,
-		double* k6,
-		double* k7,
 		double* r1,
 		double* r2,
-		double* r3)
+		double* r3,
+		double* r4)
 	{
 		for (int i = 0; i < neqn; i++)
 		{
 			r1[i] = yy[i];
-			double dy = yw[i] - yy[i];
-			double bspl = h * yyp[i] - dy;
-			r2[i] = dy;
-			r3[i] = bspl;
+			r2[i] = yyp[i];
+			r3[i] = d21 * yyp[i] + k2[i] + d23 * k3[i] + d24 * k4[i];
+			r4[i] = d31 * yyp[i] + d32 * k2[i] + d33 * k3[i] + k4[i];
 		}
 	}
 
@@ -399,20 +393,19 @@ namespace bosh3
 		double tw,
 		double* r1,
 		double* r2,
-		double* r3)
+		double* r3,
+		double* r4)
 	{
 		t = tout;
 		double h = (tt - tw);
 		double s = (tout - tw) / h;
-		double s1 = 1.0 - s;
-		double s2 = s1 - s;
-		double s3 = s * (s1 + s2);
-		double s4 = 2.0 * s * s1 * s2;
+		double s2 = s * s;
+		double s3 = s2 * s;
 
 		for (int i = 0; i < neqn; i++)
 		{
-			y[i] = r1[i] + s * (r2[i] + s1 * (r3[i]));
-			yp[i] = 1.0 / h * (r2[i] + s2 * r3[i]);
+			y[i] = r1[i] + h * (s * r2[i] + s2 * r3[i] + s3 * r4[i]);
+			yp[i] = r2[i] + 2.0 * s * r3[i] + 3.0 * s2 * r4[i];
 		}
 	}
 }

@@ -14,11 +14,16 @@ void f(double t, double y[], double yp[], void* params)
 
 }
 
+
+//
+// potentially rethink dense output
+//
+
 int main()
 {
 	double pi = 3.14159265358979323846;
 	std::vector<double> y = { 1.0, 0.0, 0.0, 1.0 };
-	Equation eq = Equation(f, 0.0, y);
+	Equation eq = Equation(f, 0.0, y, "ADB2");
 
 	for (int i = 0; i < 201; i++)
 	{
