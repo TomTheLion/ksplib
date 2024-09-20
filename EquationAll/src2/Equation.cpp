@@ -1,17 +1,14 @@
 #include <iostream>
 #include "Equation.h"
-#include "rk32.h"
-#include "rk54.h"
-#include "rk853.h"
-#include "wrapode.h"
+#include "adb2.h"
+#include "bosh3.h"
+#include "dopr5.h"
 
 // Create a default Equation object
 Equation::Equation()
 {
 	method_ = Method::NONE;
 	max_iter_ = 0;
-	tot_iter_ = 0;
-	rej_iter_ = 0;
 	iflag_ = 0;
 	neqn_ = 0;
 	reltol_ = 0.0;
@@ -41,38 +38,38 @@ Equation::Equation(
 {
 	method_ = Method::NONE;
 	max_iter_ = 0;
-	tot_iter_ = 0;
-	rej_iter_ = 0;
 	iflag_ = 0;
 	neqn_ = y.size();
 
-	if (method == "RK32")
+	if (method == "ADB2")
 	{
-		method_ = Method::RK32;
+		method_ = Method::ADB2;
 		max_iter_ = 100000;
-		rk32::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+		adb2::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
 	}
-	else if (method == "RK54")
+	else if (method == "BOSH3")
 	{
-		method_ = Method::RK54;
+		method_ = Method::BOSH3;
 		max_iter_ = 100000;
-		rk54::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+		bosh3::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
 	}
-	else if (method == "RK853")
+	else if (method == "DOPR5")
 	{
-		method_ = Method::RK853;
+		method_ = Method::DOPR5;
 		max_iter_ = 100000;
-		rk853::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+		dopr5::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
 	}
-	else if (method == "VOMS")
+	else if (method == "DOPR853")
 	{
-		method_ = Method::VOMS;
-		max_iter_ = 100000;
-		wrap_ode::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+
+	}
+	else if (method == "ODE")
+	{
+
 	}
 	else
 	{
-		throw std::runtime_error("Equation failed to initialize, unknown method.");
+		throw std::runtime_error("Equation failed, unknown method.");
 	}
 }
 
@@ -81,17 +78,15 @@ Equation::Equation(const Equation& equation)
 {
 	method_ = equation.method_;
 	max_iter_ = equation.max_iter_;
-	tot_iter_ = equation.tot_iter_;
-	rej_iter_ = equation.rej_iter_;
 	iflag_ = equation.iflag_;
 	neqn_ = equation.neqn_;
 	reltol_ = equation.reltol_;
 	abstol_ = equation.abstol_;
 	t_ = equation.t_;
-	y_ = equation.y_;
-	yp_ = equation.yp_;
 	iwork_ = equation.iwork_;
 	work_ = equation.work_;
+	y_ = equation.y_;
+	yp_ = equation.yp_;
 	params_ = equation.params_;
 	f_ = equation.f_;
 }
@@ -106,17 +101,15 @@ Equation& Equation::operator = (const Equation& equation)
 
 	method_ = equation.method_;
 	max_iter_ = equation.max_iter_;
-	tot_iter_ = equation.tot_iter_;
-	rej_iter_ = equation.rej_iter_;
 	iflag_ = equation.iflag_;
 	neqn_ = equation.neqn_;
 	reltol_ = equation.reltol_;
 	abstol_ = equation.abstol_;
 	t_ = equation.t_;
-	y_ = equation.y_;
-	yp_ = equation.yp_;
 	iwork_ = equation.iwork_;
 	work_ = equation.work_;
+	y_ = equation.y_;
+	yp_ = equation.yp_;
 	params_ = equation.params_;
 	f_ = equation.f_;
 
@@ -135,33 +128,22 @@ void Equation::step(double tout)
 {
 	switch (method_)
 	{
-	case Method::RK32:
-		rk32::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+	case Method::ADB2:
+		adb2::step(f_, max_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
 		return;
-	case Method::RK54:
-		rk54::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+	case Method::BOSH3:
+		bosh3::step(f_, max_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
 		return;
-	case Method::RK853:
-		rk853::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+	case Method::DOPR5:
+		dopr5::step(f_, max_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
 		return;
-	case Method::VOMS:
-		wrap_ode::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+	case Method::DOPR853:
+		return;
+	case Method::ODE:
 		return;
 	default:
 		return;
 	}
-}
-
-// Returns total number of iterations performed
-int Equation::get_tot_iter() const
-{
-	return tot_iter_;
-}
-
-// Returns total number of rejected iterations
-int Equation::get_rej_iter() const
-{
-	return rej_iter_;
 }
 
 // Returns status of the integrator
@@ -226,44 +208,19 @@ void Equation::get_yp(int i, int n, double* x) const
 
 std::string Equation::get_error_string() const
 {
-	std::string error_string;
-
 	switch (method_)
 	{
-	case Method::VOMS:
-		switch (abs(iflag_))
-		{
-		case 2:
-			error_string = "ode returned iflag = 2, integration reached TOUT.";
-			break;
-		case 3:
-			error_string = "ode returned iflag = 3, integration did not reach TOUT because the error tolerances were too small. But RELERR and ABSERR were increased appropriately for continuing.";
-			break;
-		case 4:
-			error_string = "ode returned iflag = 4, integration did not reach TOUT because more than " + std::to_string(max_iter_) + " steps were taken.";
-			break;
-		case 5:
-			error_string = "ode returned iflag = 5, integration did not reach TOUT because the equations appear to be stiff.";
-			break;
-		default:
-			error_string = "ode returned iflag = " + std::to_string(iflag_) + ".";
-		}
+	case Method::ADB2:
+		return "";
+	case Method::BOSH3:
+		return "";
+	case Method::DOPR5:
+		return "";
+	case Method::DOPR853:
+		return "";
+	case Method::ODE:
+		return "";
 	default:
-		switch (abs(iflag_))
-		{
-		case 2:
-			error_string = "rk returned iflag = 2, integration reached TOUT.";
-			break;
-		case 3:
-			error_string = "rk returned iflag = 3, integration did not reach TOUT because the error tolerances were too small.";
-			break;
-		case 4:
-			error_string = "rk returned iflag = 4, integration did not reach TOUT because more than " + std::to_string(max_iter_) + " steps were taken.";
-			break;
-		default:
-			error_string = "rk returned iflag = " + std::to_string(iflag_) + ".";
-		}
+		return "";
 	}
-
-	return error_string;
 }

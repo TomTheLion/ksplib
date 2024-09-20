@@ -26,7 +26,7 @@ public:
 		void f(double t, double y[], double yp[], void* params),
 		double t,
 		const std::vector<double>& y,
-		std::string method = "RK54",
+		std::string method = "DOPR5",
 		double reltol = 1e-6,
 		double abstol = 1e-6,
 		void* params = nullptr);
@@ -43,12 +43,6 @@ public:
 	// Steps Equation until time is equal to tout
 	// tout = final desired integration time
 	void step(double tout);
-
-	// Returns total number of iterations performed
-	int get_tot_iter() const;
-
-	// Returns total number of rejected iterations
-	int get_rej_iter() const;
 
 	// Returns status of the integrator
 	int get_iflag() const;
@@ -82,19 +76,17 @@ public:
 	// x = pointer to array of length n where derivatives will be stored
 	void get_yp(int i, int n, double* x) const;
 
-	// Returns error string associated with the current value of iflag_
-	std::string get_error_string() const;
-
 private:
 
 	// Integrator method to be used
 	enum class Method
 	{
 		NONE,
-		RK32,
-		RK54,
-		RK853,
-		VOMS
+		ADB2,
+		BOSH3,
+		DOPR5,
+		DOPR853,
+		ODE
 	};
 
 	Method method_;
@@ -102,32 +94,20 @@ private:
 	// Maximum number of iterations
 	int max_iter_;
 
-	// Total number of iterations
-	int tot_iter_;
-
-	// Number of rejected iterations
-	int rej_iter_;
-
 	// Flag which holds the return status of the integrator
 	int iflag_;
 
 	// Number of equations
 	int neqn_;
 
-	// Relative error tolerance
+	// Current relative error tolerance
 	double reltol_;
 
-	// Absolute error tolerance
+	// Current absolute error tolerance
 	double abstol_;
 
 	// Current time value
 	double t_;
-
-	// Current state of problem
-	std::vector<double> y_;
-
-	// Current derivative of problem
-	std::vector<double> yp_;
 
 	// Internal work space for the integrator
 	std::vector<int> iwork_;
@@ -135,9 +115,18 @@ private:
 	// Internal work space for the integrator
 	std::vector<double> work_;
 
+	// Current state of problem
+	std::vector<double> y_;
+
+	// Current derivative of problem
+	std::vector<double> yp_;
+
 	// Pointer to paramters required by derivative
 	void* params_;
 
 	// Pointer to function that calculates the derivative of the problem
 	void(*f_)(double t, double y[], double yp[], void* params);
+
+	// Returns error string associated with the current value of iflag_
+	std::string get_error_string() const;
 };

@@ -32,9 +32,11 @@ add_executable(
 	testing
 	# Equation/src/ode.cpp
 	# Equation/src/Equation.cpp
-	EquationAll/src/adb2.cpp
-	EquationAll/src/bosh3.cpp
-	EquationAll/src/dopr5.cpp
+	EquationAll/src/rk32.cpp
+	EquationAll/src/rk54.cpp
+	EquationAll/src/rk853.cpp
+	EquationAll/src/wrapode.cpp
+	EquationAll/src/ode.cpp
 	EquationAll/src/Equation.cpp
 	EquationAll/src/testing.cpp
 )
