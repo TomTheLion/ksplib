@@ -11,6 +11,6 @@ namespace kerbal_guidance_system
 {
     py::tuple kgs_simulate_atm_phase(double t, py::array_t<double> py_y, py::list py_events, py::dict py_p);
     py::tuple kgs_simulate_vac_phase(double t, py::array_t<double> py_y, py::list py_events, py::dict py_p);
-    py::array_t<double> kgs_constraint_residuals(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_p);
-    py::array_t<double> kgs_output_time_series(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_p_atm, py::dict py_p_vac);
+    py::array_t<double> kgs_constraint_residuals(double t, py::array_t<double> py_y, py::list py_events, py::dict py_p);
+    py::array_t<double> kgs_output_time_series(double t, py::array_t<double> py_y, py::list py_events, py::dict py_p_atm, py::dict py_p_vac);
 }

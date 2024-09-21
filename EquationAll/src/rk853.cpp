@@ -507,7 +507,7 @@ namespace rk853
 		double* k10)
 	{
 		// step size control parameters
-		const double alpha = 0.125;
+		const double alpha = 0.25;
 		const double beta = 0.0;
 		const double safe = 0.9;
 		const double min_scale = 0.333;
