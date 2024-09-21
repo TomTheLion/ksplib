@@ -248,6 +248,7 @@ std::string Equation::get_error_string() const
 		default:
 			error_string = "ode returned iflag = " + std::to_string(iflag_) + ".";
 		}
+		break;
 	default:
 		switch (abs(iflag_))
 		{

@@ -16,12 +16,12 @@ void f(double t, double y[], double yp[], void* params)
 }
 
 
-int main2()
+int main()
 {
 	double pi = 3.14159265358979323846;
 	std::vector<double> y = { 1.0, 0.0, 0.0, 1.0 };
 
-	Equation eq2 = Equation(f, 0.0, y, "VOMS", 1e-10, 1e-10);
+	Equation eq2 = Equation(f, 0.0, y, "VOMS", 1e-8, 1e-8);
 	Equation eq = eq2;
 	//eq.step(2.0 * pi);
 
@@ -53,7 +53,7 @@ int main2()
 	return 0;
 
 }
-int main()
+int main2()
 {
 	try
 	{

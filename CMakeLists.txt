@@ -10,24 +10,47 @@ include_directories(C:/dev/includes/eigen)
 include_directories(C:/dev/includes/nlopt-2.7.1/src/api)
 include_directories(nlopt)
 
-# include_directories(Equation/src)
-# include_directories(EquationRK/src)
-include_directories(EquationALL/src)
-include_directories(Jdate/src)
-include_directories(Ephemeris/src)
-include_directories(Orbit/src)
-include_directories(astrodynamics/src)
 include_directories(Spl/src)
-
-include_directories(FlightPlan/src)
-include_directories(LunarFlightPlan/src)
-include_directories(ConicLunarFlightPlan/src)
-
+include_directories(EquationALL/src)
 include_directories(PyModule/src)
 
+pybind11_add_module(
+	ksplib
+	Spl/src/Spl.cpp
+	EquationAll/src/rk32.cpp
+	EquationAll/src/rk54.cpp
+	EquationAll/src/rk853.cpp
+	EquationAll/src/wrapode.cpp
+	EquationAll/src/ode.cpp
+	EquationAll/src/Equation.cpp
+	PyModule/src/py_lib.cpp
+	PyModule/src/py_module.cpp
+)
 
-include_directories(testing/src)
+# target_link_libraries(ksplib PRIVATE C:/dev/includes/nlopt-2.7.1_build/Release/nlopt.lib)
 
+# include_directories(C:/dev/includes/eigen)
+# include_directories(C:/dev/includes/nlopt-2.7.1/src/api)
+
+# include_directories(Equation/src)
+# include_directories(EquationRK/src)
+# include_directories(EquationALL/src)
+# include_directories(Jdate/src)
+# include_directories(Ephemeris/src)
+# include_directories(Orbit/src)
+# include_directories(astrodynamics/src)
+# include_directories(Spl/src)
+
+# include_directories(FlightPlan/src)
+# include_directories(LunarFlightPlan/src)
+# include_directories(ConicLunarFlightPlan/src)
+
+# include_directories(PyModule/src)
+
+
+# include_directories(testing/src)
+
+#[[
 add_executable(
 	testing
 	# Equation/src/ode.cpp
@@ -38,10 +61,10 @@ add_executable(
 	EquationAll/src/wrapode.cpp
 	EquationAll/src/ode.cpp
 	EquationAll/src/Equation.cpp
-	EquationAll/src/testing.cpp
+ "PyModule/src2/py_lib.cpp" "PyModule/src2/py_lib.h" "PyModule/src2/py_module.cpp"	"testing/testing.cpp"
 )
 
-#[[
+
 add_executable(
 	testing
 	nlopt/nlopt.hpp
@@ -78,9 +101,9 @@ pybind11_add_module(
 )
 
 target_link_libraries(ksplib PRIVATE C:/dev/includes/nlopt-2.7.1_build/Release/nlopt.lib)
-]]
 
-#[[
+
+
 add_subdirectory(pybind11)
 include_directories(C:/dev/includes/eigen)
 
@@ -94,6 +117,23 @@ include_directories(LunarFlightPlan/src)
 include_directories(ConicLunarFlightPlan/src)
 include_directories(Spl/src)
 include_directories(nlopt)
+
+include_directories(Equation/src)
+include_directories(EquationRK/src)
+include_directories(EquationALL/src)
+include_directories(Jdate/src)
+include_directories(Ephemeris/src)
+include_directories(Orbit/src)
+include_directories(astrodynamics/src)
+include_directories(Spl/src)
+
+include_directories(FlightPlan/src)
+include_directories(LunarFlightPlan/src)
+include_directories(ConicLunarFlightPlan/src)
+
+include_directories(PyModule/src)
+
+
 
 pybind11_add_module(
 	ksplib
@@ -113,6 +153,7 @@ pybind11_add_module(
 )
 
 target_link_libraries(ksplib PRIVATE C:/dev/includes/nlopt-2.7.1_build/Release/nlopt.lib)
+
 
 add_executable (
 	testing

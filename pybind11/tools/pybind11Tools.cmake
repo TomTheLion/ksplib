@@ -162,7 +162,7 @@ function(pybind11_add_module target_name)
     set(exclude_from_all "")
   endif()
 
-  add_library(${target_name} ${lib_type} ${exclude_from_all} ${ARG_UNPARSED_ARGUMENTS} "../../EquationRK/src/Equation.h")
+  add_library(${target_name} ${lib_type} ${exclude_from_all} ${ARG_UNPARSED_ARGUMENTS})
 
   target_link_libraries(${target_name} PRIVATE pybind11::module)
 

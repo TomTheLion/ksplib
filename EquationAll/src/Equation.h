@@ -26,10 +26,10 @@ public:
 		void f(double t, double y[], double yp[], void* params),
 		double t,
 		const std::vector<double>& y,
-		std::string method = "RK54",
-		double reltol = 1e-6,
-		double abstol = 1e-6,
-		void* params = nullptr);
+		std::string method,
+		double reltol,
+		double abstol,
+		void* params);
 
 	// Copy constructor
 	Equation(const Equation& equation);
