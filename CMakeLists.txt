@@ -13,7 +13,18 @@ include_directories(nlopt)
 include_directories(Spl/src)
 include_directories(EquationALL/src)
 include_directories(PyModule/src)
-
+#[[
+add_executable(
+	testing
+	EquationAll/src/rk32.cpp
+	EquationAll/src/rk54.cpp
+	EquationAll/src/rk853.cpp
+	EquationAll/src/wrapode.cpp
+	EquationAll/src/ode.cpp
+	EquationAll/src/Equation.cpp
+	EquationAll/src/testing.cpp
+)
+]]
 pybind11_add_module(
 	ksplib
 	Spl/src/Spl.cpp
@@ -26,7 +37,6 @@ pybind11_add_module(
 	PyModule/src/py_lib.cpp
 	PyModule/src/py_module.cpp
 )
-
 # target_link_libraries(ksplib PRIVATE C:/dev/includes/nlopt-2.7.1_build/Release/nlopt.lib)
 
 # include_directories(C:/dev/includes/eigen)

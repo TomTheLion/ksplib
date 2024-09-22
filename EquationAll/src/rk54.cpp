@@ -228,6 +228,122 @@ namespace rk54
 		iflag = 4;
 	}
 
+		void stepn(
+			void f(double t, double y[], double yp[], void* params),
+			int max_iter,
+			int& tot_iter,
+			int& rej_iter,
+			int& iflag,
+			int neqn,
+			double reltol,
+			double abstol,
+			double& t,
+			double tout,
+			double tlim,
+			std::vector<double>& y,
+			std::vector<double>& yp,
+			std::vector<int>& iwork,
+			std::vector<double>& work,
+			void* params)
+		{
+			int& reject = iwork[0];
+
+			double& errold = work[0];
+			double& d = work[1];
+			double& hh = work[2];
+			double& tt = work[3];
+			double& tw = work[4];
+			double tti = tt;
+
+			double* yy = &work[5];
+			double* yyp = yy + neqn;
+			double* yw = yyp + neqn;
+			double* k2 = yw + neqn;
+			double* k3 = k2 + neqn;
+			double* k4 = k3 + neqn;
+			double* k5 = k4 + neqn;
+			double* k6 = k5 + neqn;
+			double* k7 = k6 + neqn;
+			double* r1 = k7 + neqn;
+			double* r2 = r1 + neqn;
+			double* r3 = r2 + neqn;
+			double* r4 = r3 + neqn;
+			double* r5 = r4 + neqn;
+
+			// if integrator is in initial state, set initial stepsize
+			// if integrator was previously successful and tout falls within the last
+			// step interpolate and return
+			if (iflag == 1)
+			{
+				initial_step_size(neqn, reltol, abstol, hh, yy, yyp);
+			}
+			else if (iflag == 2 && in_range(tout, tt, tw))
+			{
+				intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3, r4, r5);
+				return;
+			}
+
+			// set direction of integration
+			d = tout >= tt ? 1.0 : -1.0;
+
+			// main integration loop
+			for (int iter = 0; iter < max_iter; iter++)
+			{
+				tot_iter++;
+
+				if (hh < 4.0 * eps * abs(tt - tti))
+				{
+					// iflag of 3 indicates that the error tolerances are too low
+					iflag = 3;
+				}
+
+				// perform step then estimate error and update step size
+				dy(f, neqn, d * hh, tt, yy, yyp, yw, k2, k3, k4, k5, k6, k7, params);
+				update_step_size(neqn, reltol, abstol, reject, errold, d, hh, tt, tw, yy, yyp, yw, k3, k4, k5, k6, k7);
+
+				// test if step was successful
+				if (reject)
+				{
+					rej_iter++;
+					continue;
+				}
+
+				hh = std::max(hh, d * (tlim - tw));
+
+				// if step was successful and tout falls within the step prepare dense
+				// output, interpolate, and return, if step was successful and tout falls
+				// outside the step prepare the next step
+				if (in_range(tout, tt, tw))
+				{
+					// iflag of 2 indicates that integration was successful
+					iflag = 2;
+					dense(neqn, tt, tw, yy, yyp, yw, k3, k4, k5, k6, k7, r1, r2, r3, r4, r5);
+					double temp = tt;
+					tt = tw;
+					tw = temp;
+					for (int i = 0; i < neqn; i++)
+					{
+						yy[i] = yw[i];
+						yyp[i] = k7[i];
+					}
+					intrp(neqn, t, tout, y, yp, tt, tw, r1, r2, r3, r4, r5);
+					return;
+				}
+				else
+				{
+					tt = tw;
+					for (int i = 0; i < neqn; i++)
+					{
+						yy[i] = yw[i];
+						yyp[i] = k7[i];
+					}
+				}
+			}
+
+			// iflag of 4 indicates that the maximum number of iterations was exceeded
+			iflag = 4;
+		}
+
 	// Calculates Runge-Kutta steps
 	// f = pointer to function that calculates the derivative of the problem
 	// neqn = number of equations
@@ -460,14 +576,52 @@ namespace rk54
 		double s = (tout - tw) / h;
 		double s1 = 1.0 - s;
 
+		double ss = s * s;
+		double sss = ss * s;
+		double ssss = sss * s;
+
+		double hh = h * h;
+		double hhh = hh * h;
+		double hhhh = hhh * h;
+
 		for (int i = 0; i < neqn; i++)
 		{
-			double a3 = r4[i] + s1 * r5[i];
+			double a4 = r5[i];
+			double a3 = r4[i] + a4 * s1;
 			double a2 = r3[i] + a3 * s;
 			double a1 = r2[i] + a2 * s1;
 
+			double b3 = -a4;
+			double b2 = a3 + b3 * s;
+			double b1 = -a2 + b2 * s1;
+
+			double c2 = b3;
+			double c1 = -b2 + c2 * s1;
+
+			double d1 = -c2;
+
+			double a = r1[i];
+			double b = r2[i] + r3[i];
+			double c = -r3[i] + r4[i] + r5[i];
+			double d = -r4[i] - 2.0 * r5[i];
+			double e = r5[i];
+
 			y[i] = r1[i] + s * a1;
-			yp[i] = 1.0 / h * (a1 - s * (a2 - s1 * (a3 - s * r5[i])));
+			yp[i] = 1.0 / h * (a1 - s * (a2 - s1 * (a3 - s * a4)));
+			//y[i] = 1.0 / hh * 2.0 * (b1 - s * (b2 - s1 * b3));
+			//yp[i] = 1.0 / hhh * 6.0 * (c1 - s * c2);
+			//yp[i] = 1.0 / hhhh * 24.0 * d1;
+
+
+
+
+
+			//y[i] = a + b * s + c * ss + d * sss + e * ssss;
+			//yp[i] = 1.0 / h * (b + 2.0 * c * s + 3.0 * d * ss + 4.0 * e * sss);
+			//y[i] = 1.0 / h / h * (2.0 * c + 6.0 * d * s + 12.0 * e * ss);
+			//yp[i] = 1.0 / h / h / h * ( 6.0 * d + 24.0 * e * s);
+
+
 		}
 	}
 }

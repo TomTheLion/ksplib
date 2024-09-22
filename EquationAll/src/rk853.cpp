@@ -666,8 +666,16 @@ namespace rk853
 		double s = (tout - tw) / h;
 		double s1 = 1.0 - s;
 
+		double hh = h * h;
+		double hhh = hh * h;
+		double hhhh = hhh * h;
+		double hhhhh = hhhh * h;
+		double hhhhhh = hhhhh * h;
+		double hhhhhhh = hhhhhh * h;
+
 		for (int i = 0; i < neqn; i++)
 		{
+			double a7 = r8[i];
 			double a6 = r7[i] + s * r8[i];
 			double a5 = r6[i] + a6 * s1;
 			double a4 = r5[i] + a5 * s;
@@ -675,8 +683,44 @@ namespace rk853
 			double a2 = r3[i] + a3 * s;
 			double a1 = r2[i] + a2 * s1;
 
+			double b6 = a7;
+			double b5 = -a6 + b6 * s1;
+			double b4 = a5 + b5 * s;
+			double b3 = -a4 + b4 * s1;
+			double b2 = a3 + b3 * s;
+			double b1 = -a2 + b2 * s1;
+
+			double c5 = -b6;
+			double c4 = b5 + c5 * s;
+			double c3 = -b4 + c4 * s1;
+			double c2 = b3 + c3 * s;
+			double c1 = -b2 + c2 * s1;
+
+			double d4 = c5;
+			double d3 = -c4 + d4 * s1;
+			double d2 = c3 + d3 * s;
+			double d1 = -c2 + d2 * s1;
+
+			double e3 = -d4;
+			double e2 = d3 + e3 * s;
+			double e1 = -d2 + e2 * s1;
+
+			double f2 = e3;
+			double f1 = -e2 + f2 * s1;
+
+			double g1 = -f2;
+
 			y[i] = r1[i] + s * a1;
-			yp[i] = 1.0 / h * (a1 - s * (a2 - s1 * (a3 - s * (a4 - s1 * (a5 - s * (a6 - s1 * r8[i]))))));
+			// yp[i] = 1.0 / h * (a1 - s * (a2 - s1 * (a3 - s * (a4 - s1 * (a5 - s * (a6 - s1 * a7))))));
+
+			// higher derivatives
+			// yp[i] = 1.0 / hh * 2.0 * (b1 - s * (b2 - s1 * (b3 - s * (b4 - s1 * (b5 - s * b6)))));
+			// yp[i] = 1.0 / hhh * 6.0 * (c1 - s * (c2 - s1 * (c3 - s * (c4 - s1 * c5))));
+			// yp[i] = 1.0 / hhhh * 24.0 * (d1 - s * (d2 - s1 * (d3 - s * d4)));
+			// yp[i] = 1.0 / hhhhh * 120.0 * (e1 - s * (e2 - s1 * e3));
+			// yp[i] = 1.0 / hhhhhh * 720.0 * (f1 - s * f2);
+			yp[i] = 1.0 / hhhhhhh * 5040.0 * g1;
+
 		}
 	}
 }

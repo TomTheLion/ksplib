@@ -1,6 +1,7 @@
 #include <iostream>
 #include <iomanip>
 #include <fstream>
+#include <chrono>
 
 #include <Eigen/Dense>
 
@@ -446,16 +447,20 @@ namespace kerbal_guidance_system
    
             double tout = atm_params.ndim.time_to(py_event.attr("tout").cast<double>());
 
-            Equation eq = Equation(atm_state, t, y, "RK54", 1e-8, 1e-8, &atm_params);
+            Equation eq = Equation(atm_state, t, y, "RK32", 1e-9, 1e-9, &atm_params);
             int steps = int(atm_params.ndim.time_from(tout - t)) + 1;
             double dt = (tout - t) / steps;
 
             for (size_t j = 0; j < steps + 1; j++)
             {
+                // if t + j * dt <= pitch_time, int limit = pitch time
+                // if between pitch time and pitch time + pitch duration limit = pitch time + pitch duration
+                // if t = 0 dont step
+
                 eq.step(t + j * dt);
                 eq.get_y(0, 7, y.data());
+                std::vector<double> yp = eq.get_yp();
                 udpate_altitude();
-
                 if (altitude < altitude_old)
                 {
                     throw std::runtime_error("Switch altitude not reached: negative altitude rate.");
@@ -534,7 +539,7 @@ namespace kerbal_guidance_system
                 y[6] = mf; 
             }
 
-            Equation eq = Equation(vac_state, t, y, "RK853", 1e-6, 1e-6, &vac_params);
+            Equation eq = Equation(vac_state, t, y, "RK853", 1e-5, 1e-5, &vac_params);
 
             if (vac_params.final_velocity)
             {
@@ -545,6 +550,7 @@ namespace kerbal_guidance_system
                     eq.step(t + j * dt);
                     eq.get_y(0, 7, y.data());
                     udpate_velocity();
+
                     if (velocity > vac_params.final_velocity)
                     {
                         for (size_t iter = 0; iter < 10; iter++)
@@ -664,7 +670,10 @@ namespace kerbal_guidance_system
 
         std::vector<double> y = py_std_vector(py_y);
 
+        //std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         simulate_atm_phase(t, y, py_events, atm_params, nullptr);
+        //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        //std::cout << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << '\n';
 
         return py::make_tuple(t, py_copy_array(y));
     }
@@ -675,7 +684,10 @@ namespace kerbal_guidance_system
 
         std::vector<double> y = py_std_vector(py_y);
 
+        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         simulate_vac_phase(t, y, py_events, vac_params, nullptr);
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        std::cout << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << '\n';
 
         return py::make_tuple(t, py_copy_array(y));
     }
