@@ -28,6 +28,23 @@ namespace rk54
 		std::vector<int>& iwork,
 		std::vector<double>& work,
 		void* params);
+	void stepn(
+		void f(double t, double y[], double yp[], void* params),
+		int max_iter,
+		int& tot_iter,
+		int& rej_iter,
+		int& iflag,
+		int neqn,
+		double reltol,
+		double abstol,
+		double& t,
+		double tout,
+		double tlim,
+		std::vector<double>& y,
+		std::vector<double>& yp,
+		std::vector<int>& iwork,
+		std::vector<double>& work,
+		void* params);
 	void dy(
 		void f(double t, double y[], double yp[], void* params),
 		int neqn,

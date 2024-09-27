@@ -20,16 +20,19 @@ int main()
 	double pi = 3.14159265358979323846;
 	std::vector<double> y = { 1.0, 0.0, 0.0, 1.0 };
 
-	Equation eq = Equation(f, 0.0, y, "RK853", 1e-15, 1e-15, nullptr);
+	Equation eq = Equation(f, 0.0, y, "RK32", 1e-6, 1e-6, nullptr);
+	eq.set_disp(true);
 
-	for (int i = 0; i < 201; i++)
-	{
-		eq.step(pi / 100.0 * i);
-		double tout = eq.get_t();
-		std::vector<double> yout = eq.get_y();
-		std::vector<double> ypout = eq.get_yp();
-		std::cout << std::setprecision(17) << tout << " " << yout[0] << " " << yout[1] << " " << ypout[0] << " " << ypout[1] << '\n';
-	}
+	eq.stepn(2.0 * pi, 2.0 * pi);
+
+	//for (int i = 0; i < 201; i++)
+	//{
+	//	eq.step(pi / 100.0 * i);
+	//	double tout = eq.get_t();
+	//	std::vector<double> yout = eq.get_y();
+	//	std::vector<double> ypout = eq.get_yp();
+	//	std::cout << std::setprecision(17) << tout << " " << yout[0] << " " << yout[1] << " " << ypout[0] << " " << ypout[1] << '\n';
+	//}
 
 	return 0;
 

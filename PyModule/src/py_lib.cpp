@@ -10,75 +10,8 @@
 #include "Equation.h"
 #include "Spl.h"
 
-
-double* py_arr_ptr(py::object obj)
-{
-    return static_cast<double*>(obj.cast<py::array_t<double>>().request().ptr);
-}
-
-int py_arr_size(py::object obj)
-{
-    return obj.cast<py::array_t<double>>().request().size;
-}
-
-py::array_t<double> py_array_copy(py::object obj)
-{
-    py::array_t<double> arr_copy = py::array_t<double>(obj.cast<py::array_t<double>>().request());
-    return arr_copy;
-}
-
-std::vector<double> py_std_vector(py::object obj)
-{
-    size_t size = py_arr_size(obj);
-    double* data = py_arr_ptr(obj);
-    std::vector<double> arr_copy = std::vector<double>(data, data + size);
-    return arr_copy;
-}
-
-Eigen::Vector3d py_vector3d(py::object obj)
-{
-    return Eigen::Map<Eigen::Vector3d>(py_arr_ptr(obj.cast<py::array_t<double>>()));
-}
-
-Eigen::Vector3d py_vector3d(py::object obj, int n)
-{
-    return Eigen::Map<Eigen::Vector3d>(py_arr_ptr(obj.cast<py::array_t<double>>()) + n);
-}
-
-Spl py_spl(py::object obj)
-{
-    py::tuple tup = obj;
-    Spl s = { py_arr_ptr(tup[0]), py_arr_ptr(tup[1]), py_arr_size(tup[0]), tup[2].cast<int>() };
-    return s;
-}
-
-Spl py_bspl(py::object obj) {
-    py::tuple tup = obj;
-    Spl s = {
-        py_arr_ptr(tup[0]), py_arr_ptr(tup[1]), py_arr_ptr(tup[2]),
-        py_arr_size(tup[0]), py_arr_size(tup[1]),
-        tup[3].cast<int>(), tup[4].cast<int>() };
-    return s;
-}
-
-void py_copy_array(std::vector<double> x, py::array_t<double> py_x)
-{
-    double* data = py_x.mutable_data();
-    std::copy(x.begin(), x.end(), data);
-}
-
 template<typename T>
-py::list py_copy_list(std::vector<T> x)
-{
-    py::list py_list;
-
-    for (auto& v : x) py_list.append(v);
-
-    return py_list;
-}
-
-template<typename T>
-py::array_t<T> py_copy_array(std::vector<T> x)
+py::array_t<T> py_copy_array(std::vector<T>& x)
 {
     int l = x.size();
     py::array_t<double> py_x({ 1, l });
@@ -94,61 +27,46 @@ py::array_t<T> py_copy_array(std::vector<T> x)
     return py_x;
 }
 
-//template<typename T>
-//py::array_t<T, py::array::c_style> py_copy_array(std::vector<T> x)
-//{
-//    int l = x.size();
-//
-//    py::array_t<T, py::array::c_style> py_x({ l });
-//    auto mx = py_x.mutable_unchecked();
-//
-//    for (int i = 0; i < l; i++)
-//    {
-//        mx(i) = x[i];
-//    }
-//
-//    return py_x;
-//}
-
-py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<double>> x)
+std::vector<double> py_std_vector(py::object& obj)
 {
-    size_t l = x.size();
-    size_t m = x[0].size();
-
-    py::array_t<double, py::array::c_style> py_x({ l, m });
-    auto mx = py_x.mutable_unchecked();
-
-    for (int i = 0; i < l; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            mx(i, j) = x[i][j];
-        }
-    }
-
-    return py_x;
+    size_t size = obj.cast<py::array_t<double>>().size();
+    double* data = obj.cast<py::array_t<double>>().mutable_data();
+    std::vector<double> vec = std::vector<double>(data, data + size);
+    return vec;
 }
 
-py::array_t<double, py::array::c_style> py_copy_array(std::vector<std::vector<std::vector<double>>> x)
+Eigen::Vector3d py_vector3d(py::object obj)
 {
-    size_t l = x.size();
-    size_t m = x[0].size();
-    size_t n = x[0][0].size();
-    py::array_t<double, py::array::c_style> py_x({ l, m, n });
-    auto mx = py_x.mutable_unchecked();
+    return Eigen::Vector3d(obj.cast<py::array_t<double>>().mutable_data());
+}
 
-    for (int i = 0; i < l; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            for (int k = 0; k < n; k++)
-            {
-                mx(i, j, k) = x[i][j][k];
-            }
-        }
-    }
+Eigen::Vector3d py_vector3d(py::object obj, int n)
+{
+    return Eigen::Vector3d(obj.cast<py::array_t<double>>().mutable_data() + n);
+}
 
-    return py_x;
+Spl py_spl(py::object obj)
+{
+    py::tuple tup = obj;
+    Spl s = {
+        tup[0].cast<py::array_t<double>>().mutable_data(),
+        tup[1].cast<py::array_t<double>>().mutable_data(),
+        static_cast<int>(tup[0].cast<py::array_t<double>>().size()),
+        tup[2].cast<int>() };
+    return s;
+}
+
+Spl py_bspl(py::object obj) {
+    py::tuple tup = obj;
+    Spl s = {
+        tup[0].cast<py::array_t<double>>().mutable_data(),
+        tup[1].cast<py::array_t<double>>().mutable_data(),
+        tup[2].cast<py::array_t<double>>().mutable_data(),
+        static_cast<int>(tup[0].cast<py::array_t<double>>().size()),
+        static_cast<int>(tup[1].cast<py::array_t<double>>().size()),
+        tup[3].cast<int>(),
+        tup[4].cast<int>() };
+    return s;
 }
 
 namespace kerbal_guidance_system
@@ -156,7 +74,8 @@ namespace kerbal_guidance_system
     struct NDim
     {
     public:
-        NDim();
+        NDim()
+            : distance_(1.0), velocity_(1.0), acceleration_(1.0), time_(1.0), mass_(1.0) {}
 
         NDim(double distance, double velocity, double acceleration, double time, double mass)
             : distance_(distance), velocity_(velocity), acceleration_(acceleration), time_(time), mass_(mass) {}
@@ -258,6 +177,9 @@ namespace kerbal_guidance_system
         double switch_altitude;
         Spl thrust;
         double mass_rate;
+        std::string integrator;
+        double reltol;
+        double abstol;
     };
 
     struct VacParams
@@ -272,6 +194,9 @@ namespace kerbal_guidance_system
         double thrust;
         double mass_rate;
         double final_velocity;
+        std::string integrator;
+        double reltol;
+        double abstol;
     };
 
     static double safe_acos(double x)
@@ -304,9 +229,6 @@ namespace kerbal_guidance_system
             Eigen::Vector3d axis = Eigen::AngleAxisd(p->azimuth, r.normalized()) * Eigen::Vector3d::UnitY().cross(r).cross(r).normalized();
             attitude = Eigen::AngleAxisd(pitch, axis) * attitude;
         }
-
-         // check angle between attitude and surface velocity...
-
 
         double rnorm = p->ndim.distance_from(r.norm());
         double vnorm = p->ndim.velocity_from(v.norm());
@@ -440,26 +362,37 @@ namespace kerbal_guidance_system
             atm_params.mass_rate = atm_params.ndim.mass_rate_to(py_event.attr("mdot").cast<double>());
             atm_params.thrust = py_event.attr("spl_thrust").is_none() ? Spl() : py_spl(py_event[6]);
 
+            double tout = atm_params.ndim.time_to(py_event.attr("tout").cast<double>());
             if (py_event.attr("stage").cast<bool>())
             { 
                 y[6] = atm_params.ndim.mass_to(py_event.attr("mf").cast<double>());
             }
    
-            double tout = atm_params.ndim.time_to(py_event.attr("tout").cast<double>());
+            Equation eq = Equation(atm_state, t, y, atm_params.integrator, atm_params.reltol, atm_params.abstol, &atm_params);
 
-            Equation eq = Equation(atm_state, t, y, "RK32", 1e-9, 1e-9, &atm_params);
+            // eq.set_disp(true);
             int steps = int(atm_params.ndim.time_from(tout - t)) + 1;
             double dt = (tout - t) / steps;
 
             for (size_t j = 0; j < steps + 1; j++)
             {
-                // if t + j * dt <= pitch_time, int limit = pitch time
-                // if between pitch time and pitch time + pitch duration limit = pitch time + pitch duration
-                // if t = 0 dont step
-
-                eq.step(t + j * dt);
+                if (eq.get_t() < atm_params.pitch_time)
+                {
+                    if (t + j * dt < atm_params.pitch_time)
+                    {
+                        eq.stepn(t + j * dt, atm_params.pitch_time);
+                    }
+                    else
+                    {
+                        eq.stepn(atm_params.pitch_time, atm_params.pitch_time);
+                        eq.step(t + j * dt);
+                    }
+                }
+                else
+                {
+                    eq.step(t + j * dt);
+                }
                 eq.get_y(0, 7, y.data());
-                std::vector<double> yp = eq.get_yp();
                 udpate_altitude();
                 if (altitude < altitude_old)
                 {
@@ -489,16 +422,10 @@ namespace kerbal_guidance_system
                             double angle = atm_params.initial_angle + t * atm_params.angular_velocity.norm();
                             Eigen::Vector3d axis = atm_params.angular_velocity.normalized();
                             Eigen::AngleAxisd rotation = Eigen::AngleAxisd(angle, axis);
-                            Eigen::Vector3d r(y.data());
-                            Eigen::Vector3d v(y.data() + 3);
+                            Eigen::Map<Eigen::Vector3d> r(y.data());
+                            Eigen::Map<Eigen::Vector3d> v(y.data() + 3);
                             r = rotation * r;
                             v = rotation * v + atm_params.angular_velocity.cross(r);
-                            y[0] = r(0);
-                            y[1] = r(1);
-                            y[2] = r(2);
-                            y[3] = v(0);
-                            y[4] = v(1);
-                            y[5] = v(2);
                             atm_params.ndim.state_from(t, y);
                             return;
                         }
@@ -529,22 +456,25 @@ namespace kerbal_guidance_system
         for (size_t i = 0; i < py_events.size(); i++)
         {
             py::tuple event = py_events[i];
-            bool stage = event.attr("stage").cast<bool>();
-            double tout = vac_params.ndim.time_to(event.attr("tout").cast<double>());  
+      
             vac_params.mass_rate = vac_params.ndim.mass_rate_to(event.attr("mdot").cast<double>());
             vac_params.thrust = vac_params.ndim.force_to(event.attr("thrust_vac").cast<double>());
+
+            double tout = vac_params.ndim.time_to(event.attr("tout").cast<double>());
             if (tout < t) { continue; }
-            if (stage) { 
+            if (event.attr("stage").cast<bool>()) {
                 double mf = vac_params.ndim.mass_to(event.attr("mf").cast<double>());
                 y[6] = mf; 
             }
 
-            Equation eq = Equation(vac_state, t, y, "RK853", 1e-5, 1e-5, &vac_params);
+            Equation eq = Equation(vac_state, t, y, vac_params.integrator, vac_params.reltol, vac_params.abstol, &vac_params);
+            //eq.set_disp(true);
 
             if (vac_params.final_velocity)
             {
                 int steps = int(vac_params.ndim.time_from(tout - t)) + 1;
                 double dt = (tout - t) / steps;
+
                 for (size_t j = 0; j < steps + 1; j++)
                 {
                     eq.step(t + j * dt);
@@ -571,6 +501,7 @@ namespace kerbal_guidance_system
                         throw std::runtime_error("Final velocity not reached: refinement iterations exceeded.");
                     }
                 }
+                t = tout;
             }
             else
             {
@@ -604,7 +535,7 @@ namespace kerbal_guidance_system
                 }
             }
         }
-        throw std::runtime_error("Simulate vacuum phase failed to complete.");
+        vac_params.ndim.state_from(t, y);
     }
 
     static AtmParams create_atm_params(py::dict py_p)
@@ -635,7 +566,10 @@ namespace kerbal_guidance_system
             ndim.rate_to(py_p["settings"]["pitch_rate"].cast<double>()),
             ndim.distance_to(py_p["settings"]["switch_altitude"].cast<double>()),
             Spl(),
-            0.0
+            0.0,
+            py_p["settings"]["integrator"].cast<std::string>(),
+            py_p["settings"]["reltol"].cast<double>(),
+            py_p["settings"]["abstol"].cast<double>(),
         };
     }
 
@@ -659,21 +593,20 @@ namespace kerbal_guidance_system
             py_p["settings"]["x"].cast<py::array_t<double>>().at(6),
             0.0,
             0.0,
-            (!py_p["settings"]["vf"].is_none() ? ndim.velocity_to(py_p["settings"]["vf"].cast<double>()) : 0.0)
+            (!py_p["settings"]["vf"].is_none() ? ndim.velocity_to(py_p["settings"]["vf"].cast<double>()) : 0.0),
+            py_p["settings"]["integrator"].cast<std::string>(),
+            py_p["settings"]["reltol"].cast<double>(),
+            py_p["settings"]["abstol"].cast<double>(),
         };
     }
 
-    // make sure to remove output from this
     py::tuple kgs_simulate_atm_phase(double t, py::array_t<double> py_y, py::list py_events, py::dict py_p)
     {
         AtmParams atm_params = create_atm_params(py_p);
 
         std::vector<double> y = py_std_vector(py_y);
 
-        //std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         simulate_atm_phase(t, y, py_events, atm_params, nullptr);
-        //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        //std::cout << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << '\n';
 
         return py::make_tuple(t, py_copy_array(y));
     }
@@ -684,14 +617,12 @@ namespace kerbal_guidance_system
 
         std::vector<double> y = py_std_vector(py_y);
 
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         simulate_vac_phase(t, y, py_events, vac_params, nullptr);
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        std::cout << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << '\n';
 
         return py::make_tuple(t, py_copy_array(y));
     }
 
+    // will need to add constraints for other modes
     py::array_t<double> kgs_constraint_residuals(double t, py::array_t<double> py_y, py::list py_events, py::dict py_p)
     {
         VacParams vac_params = create_vac_params(py_p);

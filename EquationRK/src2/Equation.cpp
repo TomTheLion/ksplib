@@ -1,13 +1,14 @@
 #include <iostream>
 #include "Equation.h"
-#include "rk/rk.h"
-#include "ode/wrapode.h"
+#include "rk32.h"
+#include "rk54.h"
+#include "rk853.h"
+#include "wrapode.h"
 
 // Create a default Equation object
 Equation::Equation()
 {
 	method_ = Method::NONE;
-	disp_ = false;
 	max_iter_ = 0;
 	tot_iter_ = 0;
 	rej_iter_ = 0;
@@ -39,7 +40,6 @@ Equation::Equation(
 	: f_(f), t_(t), y_(y), reltol_(reltol), abstol_(abstol), params_(params)
 {
 	method_ = Method::NONE;
-	disp_ = false;
 	max_iter_ = 0;
 	tot_iter_ = 0;
 	rej_iter_ = 0;
@@ -50,19 +50,19 @@ Equation::Equation(
 	{
 		method_ = Method::RK32;
 		max_iter_ = 100000;
-		rk::init(rk::method_rk32, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+		rk32::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
 	}
 	else if (method == "RK54")
 	{
 		method_ = Method::RK54;
 		max_iter_ = 100000;
-		rk::init(rk::method_rk54, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+		rk54::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
 	}
 	else if (method == "RK853")
 	{
 		method_ = Method::RK853;
 		max_iter_ = 100000;
-		rk::init(rk::method_rk853, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+		rk853::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
 	}
 	else if (method == "VOMS")
 	{
@@ -80,7 +80,6 @@ Equation::Equation(
 Equation::Equation(const Equation& equation)
 {
 	method_ = equation.method_;
-	disp_ = equation.disp_;
 	max_iter_ = equation.max_iter_;
 	tot_iter_ = equation.tot_iter_;
 	rej_iter_ = equation.rej_iter_;
@@ -106,7 +105,6 @@ Equation& Equation::operator = (const Equation& equation)
 	}
 
 	method_ = equation.method_;
-	disp_ = equation.disp_;
 	max_iter_ = equation.max_iter_;
 	tot_iter_ = equation.tot_iter_;
 	rej_iter_ = equation.rej_iter_;
@@ -135,7 +133,23 @@ Equation::~Equation()
 // tout = final desired integration time
 void Equation::step(double tout)
 {
-	step_(tout, 0.0, false);
+	switch (method_)
+	{
+	case Method::RK32:
+		rk32::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		return;
+	case Method::RK54:
+		rk54::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		return;
+	case Method::RK853:
+		rk853::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		return;
+	case Method::VOMS:
+		wrap_ode::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		return;
+	default:
+		return;
+	}
 }
 
 // Steps Equation until time is equal to tout
@@ -143,37 +157,22 @@ void Equation::step(double tout)
 // tout = final desired integration time
 void Equation::stepn(double tout, double tlim)
 {
-	step_(tout, tlim, true);
-}
-
-// Steps Equation until time is equal to tout
-// tout = final desired integration time
-// tlim = maximum time where f can be evaluated
-// lim = tout limit flag
-void Equation::step_(double tout, double tlim, bool lim)
-{
-	iflag_ = lim ? -abs(iflag_) : abs(iflag_);
 	switch (method_)
 	{
 	case Method::RK32:
-		rk::step(rk::method_rk32, f_, disp_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, tlim, y_, yp_, iwork_, work_, params_);
-		break;
+		rk32::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		return;
 	case Method::RK54:
-		rk::step(rk::method_rk54, f_, disp_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, tlim, y_, yp_, iwork_, work_, params_);
-		break;
+		rk54::stepn(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, tlim, y_, yp_, iwork_, work_, params_);
+		return;
 	case Method::RK853:
-		rk::step(rk::method_rk853, f_, disp_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, tlim, y_, yp_, iwork_, work_, params_);
-		break;
+		rk853::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		return;
 	case Method::VOMS:
 		wrap_ode::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
-		break;
+		return;
 	default:
-		break;
-	}
-
-	if (abs(iflag_) > 2)
-	{
-		std::cerr << get_error_string() << '\n';
+		return;
 	}
 }
 
@@ -292,9 +291,4 @@ std::string Equation::get_error_string() const
 	}
 
 	return error_string;
-}
-
-void Equation::set_disp(bool disp)
-{
-	disp_ = disp;
 }

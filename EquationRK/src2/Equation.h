@@ -47,7 +47,6 @@ public:
 	// Steps Equation until time is equal to tout
 	// Prevents integrator from calling f where t > tlim
 	// tout = final desired integration time
-	// tlim = maximum time where f can be evaluated
 	void stepn(double tout, double tlim);
 
 	// Returns total number of iterations performed
@@ -91,9 +90,6 @@ public:
 	// Returns error string associated with the current value of iflag_
 	std::string get_error_string() const;
 
-	// Set the display flag
-	void set_disp(bool disp);
-
 private:
 
 	// Integrator method to be used
@@ -107,9 +103,6 @@ private:
 	};
 
 	Method method_;
-
-	// Display flag
-	bool disp_;
 
 	// Maximum number of iterations
 	int max_iter_;
@@ -152,10 +145,4 @@ private:
 
 	// Pointer to function that calculates the derivative of the problem
 	void(*f_)(double t, double y[], double yp[], void* params);
-
-	// Steps Equation until time is equal to tout
-	// tout = final desired integration time
-	// tlim = maximum time where f can be evaluated
-	// lim = tout limit flag
-	void step_(double tout, double tlim, bool lim);
 };

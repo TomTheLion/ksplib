@@ -2364,7 +2364,6 @@ namespace kerbal_guidance_systempp
                 altitude_old = altitude;
                 altitude = sqrt(y_ptr[0] * y_ptr[0] + y_ptr[1] * y_ptr[1] + y_ptr[2] * y_ptr[2]);
 
-                
                 if (output && altitude < switch_altitude)
                 {
                     output_atm_(y_ptr, atm_params, eq, output);
