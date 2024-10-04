@@ -136,20 +136,25 @@ namespace kerbal_guidance_system
         double mass_;
     };
 
-    struct DragModel
+    struct AtmModel
     {
         Spl spl_pressure;
         Spl spl_density;
         Spl spl_drag;
         Spl spl_drag_mul;
 
-        double eval(double r, double v)
+        double get_drag(double r, double v)
         {
             double pressure = exp(spl_pressure.eval(r));
             double density = exp(spl_density.eval(r));
             double mach = v / sqrt(1.4 * pressure / density);
             double drag = spl_drag.eval(mach) * spl_drag_mul.eval(density * v) * density * v * v;
             return drag;
+        }
+
+        double get_atm(double r)
+        {
+            return exp(spl_pressure.eval(r)) / 101325.0;
         }
     };
 
@@ -165,7 +170,7 @@ namespace kerbal_guidance_system
     struct AtmParams
     {
         NDim ndim;
-        DragModel drag_model;
+        AtmModel atm_model;
         Derivatives derivatives;
         double initial_angle;
         Eigen::Vector3d angular_velocity;
@@ -232,15 +237,15 @@ namespace kerbal_guidance_system
 
         double rnorm = p->ndim.distance_from(r.norm());
         double vnorm = p->ndim.velocity_from(v.norm());
-        double drag = p->ndim.force_to(p->drag_model.eval(rnorm, vnorm));
-        double thrust = p->ndim.force_to(p->thrust.eval(rnorm));
+        double drag = p->ndim.force_to(p->atm_model.get_drag(rnorm, vnorm));
+        double thrust = p->ndim.force_to(p->thrust.eval(p->atm_model.get_atm(rnorm)));
         double throttle = p->a_limit ? std::min(1.0, p->a_limit / (thrust / m)) : 1.0;
 
         p->derivatives.mass = throttle * p->mass_rate;
         p->derivatives.drag = -v.normalized() * drag / m;
         p->derivatives.thrust = attitude * throttle * thrust / m;
         p->derivatives.gravity = -r / pow(r.norm(), 3);
-        p->derivatives.rotation = -2 * p->angular_velocity.cross(v) - p->angular_velocity.cross(p->angular_velocity.cross(r));
+        p->derivatives.rotation = -2.0 * p->angular_velocity.cross(v) - p->angular_velocity.cross(p->angular_velocity.cross(r));
     }
 
     static void vac_acceleration(double t, double y[], VacParams* p)
@@ -251,7 +256,7 @@ namespace kerbal_guidance_system
 
         double a_thrust_mag = p->thrust / m;
         double throttle = p->a_limit ? std::min(1.0, p->a_limit / a_thrust_mag) : 1.0;
-        Eigen::Vector3d lambda = p->lambda_i * cos(t - p->tg) + p->lambda_dot_i * sin(t - p->tg);
+        Eigen::Vector3d lambda = t > p->tg ? p->lambda_i * cos(t - p->tg) + p->lambda_dot_i * sin(t - p->tg) : Eigen::Vector3d(v);
 
         p->derivatives.mass = throttle * p->mass_rate;
         p->derivatives.thrust = throttle * a_thrust_mag * lambda.normalized();
@@ -449,7 +454,6 @@ namespace kerbal_guidance_system
             };
 
         vac_params.ndim.state_to(t, y);
-        vac_params.tg = t;
         double final_time = t + vac_params.final_time;
         bool last = false;
 
@@ -550,7 +554,7 @@ namespace kerbal_guidance_system
 
         return AtmParams{
             ndim,
-            DragModel{
+            AtmModel{
                 py_spl(py_p["splines"]["pressure"]),
                 py_spl(py_p["splines"]["density"]),
                 py_spl(py_p["splines"]["drag"]),
@@ -587,7 +591,7 @@ namespace kerbal_guidance_system
             ndim,
             Derivatives(),
             ndim.acceleration_to(py_p["settings"]["a_limit"].cast<double>()),
-            0.0,
+            ndim.time_to(py_p["settings"]["tg"].cast<double>()),
             py_vector3d(py_p["settings"]["x"]),
             py_vector3d(py_p["settings"]["x"], 3),
             py_p["settings"]["x"].cast<py::array_t<double>>().at(6),
@@ -681,5 +685,12 @@ namespace kerbal_guidance_system
         }
 
         return py_output;
+    }
+
+    py::tuple test()
+    {
+        std::vector<double> a = { 0.0, 1.0, 2.0 };
+
+        return py::make_tuple(py::array_t<double>(a));
     }
 }

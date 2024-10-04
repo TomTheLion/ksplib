@@ -37,7 +37,7 @@ pybind11_add_module(
 	EquationAll/src/ode/wrapode.cpp
 	EquationAll/src/ode/ode.cpp
 	EquationAll/src/Equation.cpp
-	PyModule/src/py_lib.cpp
+	PyModule/src/py_lib_rf.cpp
 	PyModule/src/py_module.cpp
 )
 
