@@ -1,6 +1,7 @@
+#pragma once
+
 #include <vector>
 
-#pragma once
 
 namespace rk
 {

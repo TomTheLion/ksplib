@@ -7,7 +7,7 @@ Spl::Spl()
 
 }
 
-Spl::Spl(double* t, double* c, size_t n, size_t k)
+Spl::Spl(double* t, double* c, int n, int k)
 	: t_(t), tb_(t[k]), te_(t[n - k - 1]), c_(c), n_(n), k_(k)
 {
 
@@ -15,16 +15,21 @@ Spl::Spl(double* t, double* c, size_t n, size_t k)
 
 double Spl::eval(double x)
 {
-    x = x < tb_ ? tb_ : x > te_ ? te_ : x;
+    double tb = t_[k_];
+    double te = t_[n_ - k_ - 1];
 
-    size_t i = k_;
+    if (x < tb) x = tb;
+    if (x > te) x = te;
+
+    double d[3 + 1];
+
+    int i = k_;
     while (t_[i + 1] < x)
         i++;
 
-    double d[6] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-
-    for (size_t j = 0; j < k_ + 1; j++)
+    for (size_t j = 0; j < k_ + 1; j++) {
         d[j] = c_[j + i - k_];
+    }
 
     for (size_t r = 1; r < k_ + 1; r++) {
         for (size_t j = k_; j > r - 1; j--) {

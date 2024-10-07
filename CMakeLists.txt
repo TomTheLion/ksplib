@@ -11,32 +11,36 @@ include_directories(C:/dev/includes/nlopt-2.7.1/src/api)
 include_directories(nlopt)
 
 include_directories(Spl/src)
-include_directories(EquationALL/src)
+include_directories(Scalar/src)
+include_directories(Equation/src)
 include_directories(PyModule/src)
-#[[
+ #[[
 add_executable(
 	testing
-	EquationAll/src/rk/rk32.cpp
-	EquationAll/src/rk/rk54.cpp
-	EquationAll/src/rk/rk853.cpp
-	EquationAll/src/ode/wrapode.cpp
-	EquationAll/src/ode/ode.cpp
-	EquationAll/src/rk/rk.cpp
-	EquationAll/src/Equation.cpp
-	EquationAll/src/testing.cpp
- )
- ]]
- 
+	Equation/src/rk/rk32.cpp
+	Equation/src/rk/rk54.cpp
+	Equation/src/rk/rk853.cpp
+	Equation/src/ode/wrapode.cpp
+	Equation/src/ode/ode.cpp
+	Equation/src/rk/rk.cpp
+	Equation/src/Equation.cpp
+	Spl/src/Spl.cpp
+	Scalar/src/Scalar.cpp
+	testing.cpp
+)
+]]
+
 pybind11_add_module(
 	ksplib
 	Spl/src/Spl.cpp
-	EquationAll/src/rk/rk32.cpp
-	EquationAll/src/rk/rk54.cpp
-	EquationAll/src/rk/rk853.cpp
-	EquationAll/src/rk/rk.cpp
-	EquationAll/src/ode/wrapode.cpp
-	EquationAll/src/ode/ode.cpp
-	EquationAll/src/Equation.cpp
+	Scalar/src/Scalar.cpp
+	Equation/src/rk/rk32.cpp
+	Equation/src/rk/rk54.cpp
+	Equation/src/rk/rk853.cpp
+	Equation/src/rk/rk.cpp
+	Equation/src/ode/wrapode.cpp
+	Equation/src/ode/ode.cpp
+	Equation/src/Equation.cpp
 	PyModule/src/py_lib_rf.cpp
 	PyModule/src/py_module.cpp
 )

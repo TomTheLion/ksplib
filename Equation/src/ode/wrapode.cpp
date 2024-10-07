@@ -4,15 +4,8 @@
 namespace wrap_ode
 {
 	// Initializes Equation
-	// f = pointer to function that calculates the derivative of the problem
-	// iflag = flag which holds the return status of the integrator
-	// neqn = number of equations
-	// t = initial time
-	// y = initial state of the problem
-	// yp = derivative of problem
-	// iwork = internal work space for the integrator
-	// work = internal work space for the integrator
-	// params = optional pointer to parameters for f
+	// sets initial value of iflag, initializes workspace memory, copies initial
+	// problem state, and calculates initial derivatives
 	void init(
 		void f(double t, double y[], double yp[], void* params),
 		int& iflag,
@@ -24,32 +17,14 @@ namespace wrap_ode
 		std::vector<double>& work,
 		void* params)
 	{
-		// iflag of 1 indicates integrator is in its initial state
 		iflag = 1;
-		// set the size of yp and the internal workspace
 		yp.resize(neqn);
 		iwork.resize(5);
 		work.resize(100 + 21 * neqn);
-		// set the initial value of yp
 		f(t, y.data(), yp.data(), params);
 	}
 
 	// Steps Equation from t to tout
-	// f = pointer to function that calculates the derivative of the problem
-	// max_iter = maximum number of iterations
-	// tot_iter = total number of iterations performed
-	// rej_iter = total number of rejected iterations
-	// iflag = flag which holds the return status of the integrator
-	// neqn = number of equations
-	// reltol = relative error tolerance
-	// abstol = absolute error tolerance
-	// t = initial time
-	// tout = final desired integration time
-	// y = initial state of the problem
-	// yp = derivative of problem
-	// iwork = internal work space for the integrator
-	// work = internal work space for the integrator
-	// params = optional pointer to parameters for f
 	void step(
 		void f(double t, double y[], double yp[], void* params),
 		int max_iter,

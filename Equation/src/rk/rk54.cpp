@@ -39,7 +39,6 @@ namespace rk54
 	constexpr double e7 = -1.0 / 40.0;
 
 	// Interpolation coefficients
-
 	constexpr double d1 = -12715105075.0 / 11282082432.0;
 	constexpr double d3 = 87487479700.0 / 32700410799.0;
 	constexpr double d4 = -10690763975.0 / 1880347072.0;

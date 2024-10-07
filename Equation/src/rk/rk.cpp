@@ -35,24 +35,14 @@ namespace rk
 	};
 
 	// Tests if a value falls within a range
-	// a = value to be tested
-	// r1, r2 = bounds of the range
 	bool in_range(double a, double r1, double r2)
 	{
 		return r1 <= r2 ? r1 <= a && a <= r2 : r2 <= a && a <= r1;
 	}
 
 	// Initializes Equation
-	// method = method definition
-	// f = pointer to function that calculates the derivative of the problem
-	// iflag = flag which holds the return status of the integrator
-	// neqn = number of equations
-	// t = initial time
-	// y = initial state of the problem
-	// yp = derivative of problem
-	// iwork = internal work space for the integrator
-	// work = internal work space for the integrator
-	// params = optional pointer to parameters for f
+	// sets initial value of iflag, initializes workspace memory, copies initial
+	// problem state, and calculates initial derivatives
 	void init(
 		RKMethod method,
 		void f(double t, double y[], double yp[], void* params),
@@ -65,14 +55,10 @@ namespace rk
 		std::vector<double>& work,
 		void* params)
 	{
-		// iflag of 1 indicates integrator is in its initial state
 		iflag = 1;
-		// set the size of yp and the internal workspace
 		yp.resize(neqn);
 		iwork.resize(1);
 		work.resize(5 + method.swork * neqn);
-		// set the initial value of errold, t, and internal copies of the problem state
-		// and its derivative
 		double& errold = work[0];
 		double& tt = work[3];
 		double* yy = &work[5];
@@ -88,24 +74,6 @@ namespace rk
 	}
 
 	// Steps Equation from t to tout
-	// method = method definition
-	// f = pointer to function that calculates the derivative of the problem
-	// disp = display flag
-	// max_iter = maximum number of iterations
-	// tot_iter = total number of iterations performed
-	// rej_iter = total number of rejected iterations
-	// iflag = flag which holds the return status of the integrator
-	// neqn = number of equations
-	// reltol = relative error tolerance
-	// abstol = absolute error tolerance
-	// t = initial time
-	// tout = final desired integration time
-	// tlim = limit time that f will be evaluated if iflag < 0
-	// y = initial state of the problem
-	// yp = derivative of problem
-	// iwork = internal work space for the integrator
-	// work = internal work space for the integrator
-	// params = optional pointer to parameters for f
 	void step(
 		RKMethod method,
 		void f(double t, double y[], double yp[], void* params),
@@ -194,20 +162,41 @@ namespace rk
 
 			if (disp)
 			{
+				if (iter == 0)
+				{
+					std::cout << "iter: ";
+					std::cout << "iflag: ";
+					std::cout << "last: ";
+					std::cout << "tot_iter: ";
+					std::cout << "rej_iter: ";
+					std::cout << "tt: ";
+					std::cout << "tw: ";
+					std::cout << "t: ";
+					std::cout << "tout: ";
+					std::cout << "err: ";
+					std::cout << "hh: ";
+					for (int i = 0; i < neqn; i++)
+					{
+						std::cout << "yw[" << i << "] ";
+					}
+					std::cout << '\n';
+				}
+
 				std::cout << std::setprecision(17);
-				std::cout << "iflag: " << iflag << " ";
-				std::cout << "last: " << last << " ";
-				std::cout << "tot_iter: " << tot_iter << " ";
-				std::cout << "rej_iter: " << rej_iter << " ";
-				std::cout << "tt: " << tt << " ";
-				std::cout << "tw: " << tw << " ";
-				std::cout << "t: " << t << " ";
-				std::cout << "tout: " << tout << " ";
-				std::cout << "err: " << err << " ";
-				std::cout << "hh: " << hh << " ";
+				std::cout << iter << " ";
+				std::cout << iflag << " ";
+				std::cout << last << " ";
+				std::cout << tot_iter << " ";
+				std::cout << rej_iter << " ";
+				std::cout << tt << " ";
+				std::cout << tw << " ";
+				std::cout << t << " ";
+				std::cout << tout << " ";
+				std::cout << err << " ";
+				std::cout << hh << " ";
 				for (int i = 0; i < neqn; i++)
 				{
-					std::cout << yy[i] << " ";
+					std::cout << yw[i] << " ";
 				}
 				std::cout << '\n';
 			}
@@ -268,13 +257,6 @@ namespace rk
 	}
 
 	// Estimates the initial step size
-	// order = order of the method
-	// neqn = number of equations
-	// reltol = relative error tolerance
-	// abstol = absolute error tolerance
-	// hh = current step size
-	// yy = current state of the problem
-	// yyp = current derivative of problem
 	void initial_step_size(
 		int order,
 		int neqn,
@@ -297,13 +279,6 @@ namespace rk
 	}
 
 	// Estimates error and calculates next step size
-	// alpha = time step exponent on err
-	// beta = time step exponent on errold
-	// safe = time step safety factor
-	// reject = indicates if step was rejected
-	// err = err from current step
-	// errold = err from previous step
-	// hh = current step size
 	void update_step_size(
 		double alpha,
 		double beta,
@@ -328,8 +303,7 @@ namespace rk
 			else
 			{
 				scale = safe * pow(err, -alpha) * pow(errold, beta);
-				if (scale < min_scale) { scale = min_scale; }
-				if (scale > max_scale) { scale = max_scale; }
+				scale = scale < min_scale ? min_scale : scale > max_scale ? max_scale : scale;
 			}
 			if (reject)
 			{

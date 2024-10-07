@@ -1,74 +1,141 @@
 #include <iostream>
-#include <string>
 #include "Equation.h"
-#include "ode.hpp"
+#include "rk/rk.h"
+#include "ode/wrapode.h"
 
-// Create an uninitialized Equation object
+
 Equation::Equation()
 {
-
+	method_ = Method::NONE;
+	disp_ = false;
+	max_iter_ = 0;
+	tot_iter_ = 0;
+	rej_iter_ = 0;
+	iflag_ = 0;
+	neqn_ = 0;
+	reltol_ = 0.0;
+	abstol_ = 0.0;
+	t_ = 0.0;
+	params_ = nullptr;
+	f_ = nullptr;
 }
 
-// Create an initialized Equation object
-// f = pointer to function that calculates the derivative of the problem
-// neqn = number of equations in the problem to be solved
-// y = pointer to array of length neqn where the initial values of the
-// problem are stored
-// t = initial time
-// relerr = relative error tolerance
-// abserr = absolution error tolerance
+Equation::Equation(
+	void f(double t, double y[], double yp[], void* params),
+	double t,
+	const std::vector<double>& y,
+	std::string method,
+	double reltol,
+	double abstol,
+	void* params)
+	: f_(f), t_(t), y_(y), reltol_(reltol), abstol_(abstol), params_(params)
+{
+	method_ = Method::NONE;
+	disp_ = false;
+	max_iter_ = 0;
+	tot_iter_ = 0;
+	rej_iter_ = 0;
+	iflag_ = 0;
+	neqn_ = y.size();
+
+	if (method == "RK32")
+	{
+		method_ = Method::RK32;
+		max_iter_ = 100000;
+		rk::init(rk::method_rk32, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else if (method == "RK54")
+	{
+		method_ = Method::RK54;
+		max_iter_ = 100000;
+		rk::init(rk::method_rk54, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else if (method == "RK853")
+	{
+		method_ = Method::RK853;
+		max_iter_ = 100000;
+		rk::init(rk::method_rk853, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else if (method == "VOMS")
+	{
+		method_ = Method::VOMS;
+		max_iter_ = 100000;
+		wrap_ode::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else
+	{
+		throw std::runtime_error("Equation failed to initialize, unknown method.");
+	}
+}
+
 Equation::Equation(
 	void f(double t, double y[], double yp[], void* params),
 	int neqn,
-	const double* y,
 	double t,
-	double relerr,
-	double abserr,
+	const double* y,
+	std::string method,
+	double reltol,
+	double abstol,
 	void* params)
-	: max_iter(500), iflag_(1), neqn_(neqn), abserr_(abserr), relerr_(relerr), t_(t), ti_(t), f_(f), params_(params)
+	: f_(f), neqn_(neqn), t_(t), y_(std::vector<double>(y, y + neqn)), reltol_(reltol), abstol_(abstol), params_(params)
 {
-	abserri_ = abserr;
-	relerri_ = relerr;
-	y_.resize(neqn_);
-	yi_.resize(neqn_);
-	work_.resize(100 + 21 * neqn_);
+	method_ = Method::NONE;
+	disp_ = false;
+	max_iter_ = 0;
+	tot_iter_ = 0;
+	rej_iter_ = 0;
+	iflag_ = 0;
 
-	for (int i = 0; i < neqn_; i++)
+	if (method == "RK32")
 	{
-		y_[i] = y[i];
-		yi_[i] = y[i];
+		method_ = Method::RK32;
+		max_iter_ = 100000;
+		rk::init(rk::method_rk32, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else if (method == "RK54")
+	{
+		method_ = Method::RK54;
+		max_iter_ = 100000;
+		rk::init(rk::method_rk54, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else if (method == "RK853")
+	{
+		method_ = Method::RK853;
+		max_iter_ = 100000;
+		rk::init(rk::method_rk853, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else if (method == "VOMS")
+	{
+		method_ = Method::VOMS;
+		max_iter_ = 100000;
+		wrap_ode::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
+	}
+	else
+	{
+		throw std::runtime_error("Equation failed to initialize, unknown method.");
 	}
 }
 
-// Create a copy of another Equation object
 Equation::Equation(const Equation& equation)
-	: max_iter(equation.max_iter), iflag_(equation.iflag_), neqn_(equation.neqn_), abserr_(equation.abserr_),
-	relerr_(equation.relerr_), t_(equation.t_), ti_(equation.ti_), f_(equation.f_), params_(equation.params_)
 {
-	abserri_ = equation.abserr_;
-	relerri_ = equation.relerr_;
-	y_.resize(neqn_);
-	yi_.resize(neqn_);
-	work_.resize(100 + 21 * neqn_);
-
-	for (int i = 0; i < neqn_; i++)
-	{
-		y_[i] = equation.y_[i];
-		yi_[i] = equation.yi_[i];
-	}
-
-	for (int i = 0; i < 5; i++)
-	{
-		iwork_[i] = equation.iwork_[i];
-	}
-
-	for (int i = 0; i < 100 + 21 * neqn_; i++)
-	{
-		work_[i] = equation.work_[i];
-	}
+	method_ = equation.method_;
+	disp_ = equation.disp_;
+	max_iter_ = equation.max_iter_;
+	tot_iter_ = equation.tot_iter_;
+	rej_iter_ = equation.rej_iter_;
+	iflag_ = equation.iflag_;
+	neqn_ = equation.neqn_;
+	reltol_ = equation.reltol_;
+	abstol_ = equation.abstol_;
+	t_ = equation.t_;
+	y_ = equation.y_;
+	yp_ = equation.yp_;
+	iwork_ = equation.iwork_;
+	work_ = equation.work_;
+	params_ = equation.params_;
+	f_ = equation.f_;
 }
 
-// Assign state from an existing Equation object
 Equation& Equation::operator = (const Equation& equation)
 {
 	if (&equation == this)
@@ -76,122 +143,76 @@ Equation& Equation::operator = (const Equation& equation)
 		return *this;
 	}
 
-	max_iter = equation.max_iter;
+	method_ = equation.method_;
+	disp_ = equation.disp_;
+	max_iter_ = equation.max_iter_;
+	tot_iter_ = equation.tot_iter_;
+	rej_iter_ = equation.rej_iter_;
 	iflag_ = equation.iflag_;
 	neqn_ = equation.neqn_;
-	abserr_ = equation.abserr_;
-	abserri_ = equation.abserr_;
-	relerr_ = equation.relerr_;
-	relerri_ = equation.relerr_;
+	reltol_ = equation.reltol_;
+	abstol_ = equation.abstol_;
 	t_ = equation.t_;
-	ti_ = equation.ti_;
-	f_ = equation.f_;
+	y_ = equation.y_;
+	yp_ = equation.yp_;
+	iwork_ = equation.iwork_;
+	work_ = equation.work_;
 	params_ = equation.params_;
-
-	y_.resize(neqn_);
-	yi_.resize(neqn_);
-	work_.resize(100 + 21 * neqn_);
-
-	for (int i = 0; i < neqn_; i++)
-	{
-		y_[i] = equation.y_[i];
-		yi_[i] = equation.yi_[i];
-	}
-
-	for (int i = 0; i < 5; i++)
-	{
-		iwork_[i] = equation.iwork_[i];
-	}
-
-	for (int i = 0; i < 100 + 21 * neqn_; i++)
-	{
-		work_[i] = equation.work_[i];
-	}
+	f_ = equation.f_;
 
 	return *this;
 }
 
-// Destroy equation object
-Equation::~Equation()
-{
-
-}
-
-// Steps Equation until time is equal to tout
-// tout = final desired integration time
 void Equation::step(double tout)
 {
-	int iter = 0;
-	bool tflag = false;
-
-	// if tout is equal to the current time do nothing
-	if (t_ != tout)
-	{
-		while (iter < max_iter)
-		{
-			iter++;
-
-			// call to ode to step to tout
-			ode(f_, neqn_, &y_[0], t_, tout, relerr_, abserr_, iflag_, &work_[0], iwork_, params_);
-
-			// break loop if ode reaches tout, if ode fails to reach tout due to too small
-			// tolerances, or the maximum number of iterations have been reached
-			if (!(abs(iflag_) > 2 && iter < max_iter))
-			{
-				break;
-			}
-
-			// if tolerances where changed set tflag to true
-			if (abs(iflag_ == 3))
-			{
-				tflag = true;
-			}
-		}
-
-		if (tflag) {
-			std::cerr << "Equation failed, " + get_error_string(3);
-		}
-
-		// if the step failed throw with error message
-		if (iflag_ != 2)
-		{
-			throw std::runtime_error("Equation failed, " + get_error_string(iflag_));
-		}
-	}
+	step_(tout, 0.0, false);
 }
 
-// Steps Equation until time is equal to tout
-// Prevents ODE from calling f where t > tout
-// tout = final desired integration time
 void Equation::stepn(double tout)
 {
-	// setting iflag_ to be negative indicates to ODE that the f_ cannot be
-	// evaluated past tout.
-	iflag_ = -abs(iflag_);
+	step_(tout, tout, true);
+}
 
-	if (t_ != tout)
+void Equation::stepn(double tout, double tlim)
+{
+	step_(tout, tlim, true);
+}
+
+void Equation::step_(double tout, double tlim, bool lim)
+{
+	iflag_ = lim ? -abs(iflag_) : abs(iflag_);
+	switch (method_)
 	{
-		step(tout);
+	case Method::RK32:
+		rk::step(rk::method_rk32, f_, disp_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, tlim, y_, yp_, iwork_, work_, params_);
+		break;
+	case Method::RK54:
+		rk::step(rk::method_rk54, f_, disp_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, tlim, y_, yp_, iwork_, work_, params_);
+		break;
+	case Method::RK853:
+		rk::step(rk::method_rk853, f_, disp_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, tlim, y_, yp_, iwork_, work_, params_);
+		break;
+	case Method::VOMS:
+		wrap_ode::step(f_, max_iter_, tot_iter_, rej_iter_, iflag_, neqn_, reltol_, abstol_, t_, tout, y_, yp_, iwork_, work_, params_);
+		break;
+	default:
+		break;
+	}
+
+	if (abs(iflag_) > 2)
+	{
+		std::cerr << get_error_string() << '\n';
 	}
 }
 
-// Resets Equation to its initial values
-void Equation::reset()
+int Equation::get_tot_iter() const
 {
-	iflag_ = 1;
-	t_ = ti_;
-	abserr_ = abserri_;
-	relerr_ = relerri_;
-	for (int i = 0; i < neqn_; i++)
-	{
-		y_[i] = yi_[i];
-	}
+	return tot_iter_;
 }
 
-// Reinitializes Equation by setting iflag to 1
-void Equation::reinit()
+int Equation::get_rej_iter() const
 {
-	iflag_ = 1;
+	return rej_iter_;
 }
 
 int Equation::get_iflag() const
@@ -204,24 +225,9 @@ int Equation::get_neqn() const
 	return neqn_;
 }
 
-double Equation::get_relerr() const
-{
-	return relerr_;
-}
-
-double Equation::get_abserr() const
-{
-	return abserr_;
-}
-
 double Equation::get_t() const
 {
 	return t_;
-}
-
-double Equation::get_ti() const
-{
-	return ti_;
 }
 
 double Equation::get_y(int i) const
@@ -229,86 +235,81 @@ double Equation::get_y(int i) const
 	return y_[i];
 }
 
-double Equation::get_yi(int i) const
+std::vector<double> Equation::get_y() const
 {
-	return yi_[i];
-}
-
-double Equation::get_yp(int i) const
-{
-	// a is a pointer to the first value in the derivative of f_ which is
-	// stored in work_
-	const double* a = &work_[99 + neqn_ * 4];
-	return a[i];
+	return y_;
 }
 
 void Equation::get_y(int i, int n, double* x) const
 {
 	const double* a = &y_[i];
-	for(int j = 0; j < n; j++)
+	for (int j = 0; j < n; j++)
 		*x++ = *a++;
 }
 
-void Equation::get_yi(int i, int n, double* x) const
+double Equation::get_yp(int i) const
 {
-	const double* a = &yi_[i];
-	for (int j = 0; j < n; j++)
-		*x++ = *a++;
+	return yp_[i];
+}
+
+std::vector<double> Equation::get_yp() const
+{
+	return yp_;
 }
 
 void Equation::get_yp(int i, int n, double* x) const
 {
-	// a is a pointer to the first value in the derivative of f_ which is
-	// stored in work_
-	const double* a = &work_[99 + neqn_ * 4 + i];
+	const double* a = &yp_[i];
 	for (int j = 0; j < n; j++)
 		*x++ = *a++;
 }
 
-void Equation::set_ti(double x)
-{
-	ti_ = x;
-}
-
-void Equation::set_yi(int i, double x)
-{
-	yi_[i] = x;
-}
-
-void Equation::set_yi(int i, int n, const double* x)
-{
-	double* a = &yi_[i];
-	for (int j = 0; j < n; j++)
-		*a++ = *x++;
-}
-
-void Equation::set_params(void* p)
-{
-	params_ = p;
-}
-
-// Returns error string associated with the current value of iflag_
-std::string Equation::get_error_string(int iflag) const
+std::string Equation::get_error_string() const
 {
 	std::string error_string;
 
-	switch(abs(iflag))
+	switch (method_)
 	{
+	case Method::VOMS:
+		switch (abs(iflag_))
+		{
 		case 2:
-			error_string = "ode returned iflag = 2, integration reached TOUT.\n";
+			error_string = "ode returned iflag = 2, integration reached TOUT.";
 			break;
 		case 3:
-			error_string = "ode returned iflag = 3, integration did not reach TOUT because the error tolerances were too small. But RELERR and ABSERR were increased appropriately for continuing.\n";
+			error_string = "ode returned iflag = 3, integration did not reach TOUT because the error tolerances were too small. But RELERR and ABSERR were increased appropriately for continuing.";
 			break;
 		case 4:
-			error_string = "ode returned iflag = 4, integration did not reach TOUT because more than " + std::to_string(500 * max_iter) + " steps were taken.\n";
+			error_string = "ode returned iflag = 4, integration did not reach TOUT because more than " + std::to_string(max_iter_) + " steps were taken.";
 			break;
 		case 5:
-			error_string = "ode returned iflag = 5, integration did not reach TOUT because the equations appear to be stiff.\n";
+			error_string = "ode returned iflag = 5, integration did not reach TOUT because the equations appear to be stiff.";
 			break;
 		default:
-			error_string = "ode returned iflag = " + std::to_string(iflag_) + ".\n";
+			error_string = "ode returned iflag = " + std::to_string(iflag_) + ".";
+		}
+		break;
+	default:
+		switch (abs(iflag_))
+		{
+		case 2:
+			error_string = "rk returned iflag = 2, integration reached TOUT.";
+			break;
+		case 3:
+			error_string = "rk returned iflag = 3, integration did not reach TOUT because the error tolerances were too small.";
+			break;
+		case 4:
+			error_string = "rk returned iflag = 4, integration did not reach TOUT because more than " + std::to_string(max_iter_) + " steps were taken.";
+			break;
+		default:
+			error_string = "rk returned iflag = " + std::to_string(iflag_) + ".";
+		}
 	}
 
 	return error_string;
+}
+
+void Equation::set_disp(bool disp)
+{
+	disp_ = disp;
 }
