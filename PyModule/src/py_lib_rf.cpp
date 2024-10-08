@@ -32,6 +32,7 @@ namespace py_util
 }
 
 // if we could pass the base vehicle from python, and add the coast stuff here and calculate the gradient...
+// create different derivative functions for vac phase depending on if using lambda vs velocity for the thrust direction
 namespace kerbal_guidance_system
 {
 	struct VacParams {
@@ -60,10 +61,50 @@ namespace kerbal_guidance_system
 		double ndim_thrust_acceleration = vac_params->ndim_vacuum_thrust / ndim_m;
 		double throttle = ndim_thrust_acceleration && vac_params->ndim_acceleration_limit < ndim_thrust_acceleration ? vac_params->ndim_acceleration_limit / ndim_thrust_acceleration : 1.0;
 
-		ndim_dr = ndim_dv;
+		ndim_dr = ndim_v;
 		ndim_dv = throttle * ndim_thrust_acceleration * l.normalized() - ndim_r / pow(ndim_r.norm(), 3.0);
 		ndim_dm = -throttle * vac_params->ndim_mass_rate;
 	}
+
+	static void yp_vac_stm(double t, double y[], double yp[], void* params)
+	{
+		// state
+		Eigen::Map<Eigen::Vector3d> r(y);
+		Eigen::Map<Eigen::Vector3d> v(y + 3);
+		Eigen::Map<Eigen::Vector3d> l(y + 6);
+		Eigen::Map<Eigen::Vector3d> ld(y + 9);
+		double m = y[12];
+		double ft = y[13];
+		double ve = y[14];
+		Eigen::Map<Eigen::Matrix<double, 13, 13>> stm(y + 15);
+
+		// derivatives
+		Eigen::Map<Eigen::Vector3d> dr(yp);
+		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
+		Eigen::Map<Eigen::Vector3d> dl(yp + 6);
+		Eigen::Map<Eigen::Vector3d> dld(yp + 9);
+		double dm = yp[12];
+		double dft = yp[13];
+		double dve = yp[14];
+		Eigen::Map<Eigen::Matrix<double, 13, 13>> dstm(yp + 15);
+		Eigen::Map<Eigen::Matrix3d> drdv(dstm.data(), 0, 3);
+
+		// set derivatives
+		dr = v;
+		dv = -r / pow(r.norm(), 3.0) + l.normalized() * ft / m;
+		dl = ld;
+		dld = -l;
+		dm = -ft / ve;
+		dft = 0.0;
+		dve = 0.0;
+		
+		// set stm derivatives
+		dstm.setZero();
+		drdv(0, 0) = 1.0;
+		drdv(1, 1) = 1.0;
+		drdv(2, 2) = 1.0;
+	}
+
 
 	static void simulate_vac_phase(double& t, py::array_t<double>& py_y, py::list& py_events, py::dict& py_params, std::vector<double>* output)
 	{

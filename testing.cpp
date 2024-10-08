@@ -6,6 +6,7 @@
 #include "Equation.h"
 #include "Spl.h"
 #include "Scalar.h"
+#include <Eigen/Dense>
 
 void f(double t, double y[], double yp[], void* params)
 {
@@ -15,6 +16,155 @@ void f(double t, double y[], double yp[], void* params)
 	yp[1] = y[3];
 	yp[2] = -y[0] / r3;
 	yp[3] = -y[1] / r3;
+}
+
+static void yp_vac_stm(double t, double y[], double yp[], void* params)
+{
+	// state
+	Eigen::Map<Eigen::Vector3d> r(y);
+	Eigen::Map<Eigen::Vector3d> v(y + 3);
+	Eigen::Map<Eigen::Vector3d> l(y + 6);
+	Eigen::Map<Eigen::Vector3d> ld(y + 9);
+	double m = y[12];
+	double ft = y[13];
+	double ve = y[14];
+	Eigen::Map<Eigen::Matrix<double, 13, 13>> stm(y + 15);
+
+	// derivatives
+	Eigen::Map<Eigen::Vector3d> dr(yp);
+	Eigen::Map<Eigen::Vector3d> dv(yp + 3);
+	Eigen::Map<Eigen::Vector3d> dl(yp + 6);
+	Eigen::Map<Eigen::Vector3d> dld(yp + 9);
+	double dm = yp[12];
+	double dft = yp[13];
+	double dve = yp[14];
+	Eigen::Map<Eigen::Matrix<double, 13, 13>> dstm(yp + 15);
+	Eigen::Ref<Eigen::Matrix3d> dr_dv = dstm.block<3, 3>(0, 3);
+	Eigen::Ref<Eigen::Matrix3d> dv_dr = dstm.block<3, 3>(3, 0);
+	Eigen::Ref<Eigen::Matrix3d> dv_dl = dstm.block<3, 3>(3, 6);
+	Eigen::Ref<Eigen::Vector3d> dv_dm = dstm.block<3, 1>(3, 12);
+
+	Eigen::Ref<Eigen::Matrix3d> dl_dld = dstm.block<3, 3>(6, 9);
+	Eigen::Ref<Eigen::Matrix3d> dld_dl = dstm.block<3, 3>(9, 6);
+
+	double& ddmdm = yp[183];
+
+	// is it faster to repeat multiplcations?
+
+	// set derivatives
+	dr = v;
+	dv = -r / pow(r.norm(), 3.0) + l.normalized() * ft / m;
+	dl = ld;
+	dld = -l;
+	dm = -ft / ve;
+	dft = 0.0;
+	dve = 0.0;
+
+	// set stm derivatives
+	dstm.setZero();
+	dr_dv.setIdentity();
+	dv_dr(0, 0) = 3.0 * r(0) * r(0) - r.squaredNorm();
+	dv_dr(0, 1) = 3.0 * r(0) * r(1);
+	dv_dr(0, 2) = 3.0 * r(0) * r(2);
+
+	dv_dr(1, 0) = 3.0 * r(1) * r(0);
+	dv_dr(1, 1) = 3.0 * r(1) * r(1) - r.squaredNorm();
+	dv_dr(1, 2) = 3.0 * r(1) * r(2);
+
+	dv_dr(2, 0) = 3.0 * r(2) * r(0);
+	dv_dr(2, 1) = 3.0 * r(2) * r(1);
+	dv_dr(2, 2) = 3.0 * r(2) * r(2) - r.squaredNorm();
+
+	dv_dr *= pow(r.norm(), -5.0);
+
+	dv_dl(0, 0) = (l(1) * l(1) + l(2) * l(2)) * pow(l.norm(), -3.0);
+	dv_dl(0, 1) = -l(0) * l(1) * pow(l.norm(), -3.0);
+	dv_dl(0, 2) = -l(0) * l(2) * pow(l.norm(), -3.0);
+
+	dv_dl(1, 0) = -l(1) * l(0) * pow(l.norm(), -3.0);
+	dv_dl(1, 1) = (l(0) * l(0) + l(2) * l(2)) * pow(l.norm(), -3.0);
+	dv_dl(1, 2) = -l(1) * l(2) * pow(l.norm(), -3.0);
+
+	dv_dl(2, 0) = -l(2) * l(0) * pow(l.norm(), -3.0);
+	dv_dl(2, 1) = -l(2) * l(1) * pow(l.norm(), -3.0);
+	dv_dl(2, 2) = (l(0) * l(0) + l(1) * l(1)) * pow(l.norm(), -3.0);
+
+	dv_dl *= ft / m;
+
+	dl_dld.setIdentity();
+	dld_dl.setIdentity();
+	dld_dl = -dld_dl;
+
+	dv_dm = -l.normalized() * ft / m / m;
+}
+
+void print_y(double* y)
+{
+	for (size_t i = 0; i < 15; i++)
+	{
+		std::cout << std::setprecision(17) << y[i] << " ";
+	}
+	std::cout << '\n';
+	for (size_t i = 0; i < 13; i++)
+	{
+		for (size_t j = 0; j < 13; j++)
+		{
+			std::cout << std::setprecision(17) << y[i  + j * 13 + 15] << " ";
+		}
+		std::cout << '\n';
+	}
+}
+
+void print_dyp_dy(double* y)
+{
+	std::vector<double> yp1_(184);
+	std::vector<double> yp2_(184);
+	for (size_t i = 0; i < 13; i++)
+	{
+		std::vector<double> y_ = std::vector<double>(y, y + 184);
+		yp_vac_stm(0.0, y_.data(), yp1_.data(), nullptr);
+		y_[i] += 1e-10;
+		yp_vac_stm(0.0, y_.data(), yp2_.data(), nullptr);
+		for (size_t j = 0; j < 13; j++)
+		{
+			std::cout << (yp2_[j] - yp1_[j]) / 1e-10 << " ";
+		}
+		std::cout << '\n';
+	}
+}
+
+int main()
+{
+	double pi = 3.14159265358979323846;
+	std::vector<double> y(184);
+	std::vector<double> yp(184);
+	Eigen::Map<Eigen::Vector3d> r(y.data());
+	Eigen::Map<Eigen::Vector3d> v(y.data() + 3);
+	Eigen::Map<Eigen::Vector3d> l(y.data() + 6);
+	Eigen::Map<Eigen::Vector3d> ld(y.data() + 9);
+	double& m = y[12];
+	double& ft = y[13];
+	double& ve = y[14];
+	Eigen::Map<Eigen::Matrix<double, 13, 13>> stm(y.data() + 15);
+	r << 1.01, 0.02, 0.03;
+	v << 0.04, 0.85, 0.06;
+	l << 0.37, 0.88, 0.09;
+	ld << -1.10, -0.11, -0.12;
+	m = 1.44;
+	ft = 1.33;
+	ve = 1.11;
+	stm.setIdentity();
+
+	yp_vac_stm(0.0, y.data(), yp.data(), nullptr);
+
+	//print_dyp_dy(y.data());
+
+	print_y(yp.data());
+
+	//Equation eq54 = Equation(f, 0.0, y, "RK54", 1e-3, 1e-3);
+
+	return 0;
+
 }
 
 int main2()
@@ -106,23 +256,7 @@ void testeq(Equation& eq)
 	std::cout << '\n';
 }
 
-int main()
-{
-	double pi = 3.14159265358979323846;
-	std::vector<double> y = { 1.0, 0.0, 0.0, 1.0 };
 
-	Equation eq32 = Equation(f, 0.0, y, "RK32", 1e-8, 1e-8);
-	Equation eq54 = Equation(f, 0.0, y, "RK54", 1e-3, 1e-3);
-	Equation eq853 = Equation(f, 0.0, y, "RK853", 1e-8, 1e-8);
-	Equation eqvoms = Equation(f, 0.0, y, "VOMS", 1e-8, 1e-8);
-
-	eq54.set_disp(true);
-
-	eq54.stepn(2.0 * pi);
-
-	return 0;
-
-}
 
 //int main2()
 //{
