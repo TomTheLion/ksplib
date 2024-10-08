@@ -47,7 +47,7 @@ static void yp_vac_stm(double t, double y[], double yp[], void* params)
 	Eigen::Ref<Eigen::Matrix3d> dl_dld = dstm.block<3, 3>(6, 9);
 	Eigen::Ref<Eigen::Matrix3d> dld_dl = dstm.block<3, 3>(9, 6);
 
-	double& ddmdm = yp[183];
+	double& dmdm = yp[183];
 
 	// is it faster to repeat multiplcations?
 
@@ -96,6 +96,8 @@ static void yp_vac_stm(double t, double y[], double yp[], void* params)
 	dld_dl = -dld_dl;
 
 	dv_dm = -l.normalized() * ft / m / m;
+
+	// dm_dm = a_limit / ve if a > alimit 
 }
 
 void print_y(double* y)
