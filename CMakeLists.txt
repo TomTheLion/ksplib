@@ -14,7 +14,7 @@ include_directories(Spl/src)
 include_directories(Scalar/src)
 include_directories(Equation/src)
 include_directories(PyModule/src)
-
+ #[[
 add_executable(
 	testing
 	Equation/src/rk/rk32.cpp
@@ -28,8 +28,8 @@ add_executable(
 	Scalar/src/Scalar.cpp
 	testing.cpp
 )
+]]
 
- #[[
 pybind11_add_module(
 	ksplib
 	Spl/src/Spl.cpp
@@ -44,7 +44,7 @@ pybind11_add_module(
 	PyModule/src/py_lib_rf.cpp
 	PyModule/src/py_module.cpp
 )
-]]
+
 # target_link_libraries(ksplib PRIVATE C:/dev/includes/nlopt-2.7.1_build/Release/nlopt.lib)
 
 # include_directories(C:/dev/includes/eigen)

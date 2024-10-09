@@ -56,7 +56,6 @@ namespace kerbal_guidance_system
 		Eigen::Map<Eigen::Vector3d> v(y + 3);
 		double& m = y[6];
 		
-
 		// state derivatives
 		Eigen::Map<Eigen::Vector3d> dr(yp);
 		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
@@ -95,7 +94,7 @@ namespace kerbal_guidance_system
 		dv = -r / pow(r.norm(), 3.0) + throttle * l.normalized() * thrust / m;
 		dm = -throttle * mass_rate;
 
-		// set stm derivatives
+		// set state transition matrix derivatives
 		dstm.setZero();
 
 		dr_dv.setIdentity();
@@ -111,9 +110,12 @@ namespace kerbal_guidance_system
 		dstm *= stm;
 	}
 
-
 	static void simulate_vac_phase(double& t, py::array_t<double>& py_y, py::list& py_events, py::dict& py_params, std::vector<double>* output)
 	{
+		std::string integrator = py_params["settings"]["integrator"].cast<std::string>();
+		double reltol = py_params["settings"]["reltol"].cast<double>();
+		double abstol = py_params["settings"]["abstol"].cast<double>();
+
 		Scalar scalar = Scalar(
 			py_params["scalars"]["time"].cast<double>(),
 			py_params["scalars"]["distance"].cast<double>(),
@@ -130,10 +132,6 @@ namespace kerbal_guidance_system
 		double& ndim_thrust_vac = params[6];
 		double& ndim_mass_rate = params[7];
 
-		std::string integrator = py_params["settings"]["integrator"].cast<std::string>();
-		double reltol = py_params["settings"]["reltol"].cast<double>();
-		double abstol = py_params["settings"]["abstol"].cast<double>();
-
 		bool last = false;
 		double* y = py_util::array_ptr(py_y);
 		scalar.ndim(state_scalars, y, 7);
@@ -144,21 +142,27 @@ namespace kerbal_guidance_system
 		for (size_t i = 0; i < py_events.size(); i++)
 		{
 			py::tuple py_event = py_events[i];
-			ndim_thrust_vac = scalar.ndim(Scalar::Quantity::FORCE, py_event.attr("vacuum_thrust").cast<double>());
-			ndim_mass_rate = scalar.ndim(Scalar::Quantity::MASS_RATE, py_event.attr("mass_rate").cast<double>());
-
+			
 			bool stage = py_event.attr("stage").cast<bool>();
 			double ndim_tout = scalar.ndim(Scalar::Quantity::TIME, py_event.attr("tout").cast<double>());
+
+			if (ndim_tout < t) continue;
+			if (stage) y[6] = scalar.ndim(Scalar::Quantity::MASS, py_event.attr("mass_final").cast<double>());
+
+			ndim_thrust_vac = scalar.ndim(Scalar::Quantity::FORCE, py_event.attr("vacuum_thrust").cast<double>());
+			ndim_mass_rate = scalar.ndim(Scalar::Quantity::MASS_RATE, py_event.attr("mass_rate").cast<double>());
 
 			// if tout > coast time
 			// integrate to coast time
 			// coast to coast_time + coast_duration
 			// increase future tout values by coast duration
 
-			if (ndim_tout < t) continue;
-			if (stage)
+			// before coast time + coast duration different everything is being used so think about that
+			// do we need a different stm function prior to coast?
+
+			if (ndim_tout > ndim_coast_time && ndim_coast_time > t)
 			{
-				y[6] = scalar.ndim(Scalar::Quantity::MASS, py_event.attr("mass_final").cast<double>());
+
 			}
 
 			Equation eq = Equation(yp_vac, 7, t, y, integrator, reltol, abstol, &params);
