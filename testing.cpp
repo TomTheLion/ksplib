@@ -210,12 +210,13 @@ int main()
 	// test pre calculated some values in derivative for speed
 	// create test function for derivatives
 	double x0 = 0.0;
+	//Equation eq54;
 	std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-	for (int i = 0; i < 10000; i++)
+	for (int i = 0; i < 1000; i++)
 	{
-		Equation eq54 = Equation(yp_vac_stm, 0.0, y, "RK54", 1e-10, 1e-10, &p[0]);
-		eq54.step(0.5);
-		x0 += eq54.get_y(0);
+		Equation eq54= Equation(yp_vac_stm, 0.0, y, "RK54", 1e-10, 1e-10, &p[0]);
+		// eq54.step(0.5);
+		// x0 += eq54.get_y(0);
 	}
 	std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 	std::cout << std::setprecision(17) << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << '\n';

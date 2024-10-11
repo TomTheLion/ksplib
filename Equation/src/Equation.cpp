@@ -28,44 +28,9 @@ Equation::Equation(
 	double reltol,
 	double abstol,
 	void* params)
-	: f_(f), t_(t), y_(y), reltol_(reltol), abstol_(abstol), params_(params)
+	: f_(f), neqn_(y.size()), t_(t), y_(y), reltol_(reltol), abstol_(abstol), params_(params)
 {
-	method_ = Method::NONE;
-	disp_ = false;
-	max_iter_ = 0;
-	tot_iter_ = 0;
-	rej_iter_ = 0;
-	iflag_ = 0;
-	neqn_ = y.size();
-
-	if (method == "RK32")
-	{
-		method_ = Method::RK32;
-		max_iter_ = 100000;
-		rk::init(rk::method_rk32, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
-	}
-	else if (method == "RK54")
-	{
-		method_ = Method::RK54;
-		max_iter_ = 100000;
-		rk::init(rk::method_rk54, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
-	}
-	else if (method == "RK853")
-	{
-		method_ = Method::RK853;
-		max_iter_ = 100000;
-		rk::init(rk::method_rk853, f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
-	}
-	else if (method == "VOMS")
-	{
-		method_ = Method::VOMS;
-		max_iter_ = 100000;
-		wrap_ode::init(f_, iflag_, neqn_, t_, y_, yp_, iwork_, work_, params_);
-	}
-	else
-	{
-		throw std::runtime_error("Equation failed to initialize, unknown method.");
-	}
+	init_(method);
 }
 
 Equation::Equation(
@@ -77,7 +42,12 @@ Equation::Equation(
 	double reltol,
 	double abstol,
 	void* params)
-	: f_(f), neqn_(neqn), t_(t), y_(std::vector<double>(y, y + neqn)), reltol_(reltol), abstol_(abstol), params_(params)
+	: f_(f), neqn_(neqn), t_(t), y_(y, y + neqn), reltol_(reltol), abstol_(abstol), params_(params)
+{
+	init_(method);
+}
+
+void Equation::init_(std::string method)
 {
 	method_ = Method::NONE;
 	disp_ = false;

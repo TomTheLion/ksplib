@@ -13,8 +13,38 @@ Spl::Spl(double* t, double* c, size_t n, size_t k)
 
 }
 
+Spl::Spl(const Spl& spl)
+{
+    t_ = spl.t_;
+    tb_ = spl.tb_;
+    te_ = spl.te_;
+    c_ = spl.c_;
+    n_ = spl.n_;
+    k_ = spl.k_;
+}
+
+Spl& Spl::operator = (const Spl& spl)
+{
+	if (&spl == this)
+	{
+		return *this;
+	}
+
+    t_ = spl.t_;
+    tb_ = spl.tb_;
+    te_ = spl.te_;
+    c_ = spl.c_;
+    n_ = spl.n_;
+    k_ = spl.k_;
+
+     return *this;
+}
+
+
 double Spl::eval(double x)
 {
+    if (!t_) return 0.0;
+
     x = x < tb_ ? tb_ : x > te_ ? te_ : x;
 
     size_t i = k_;

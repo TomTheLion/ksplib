@@ -75,5 +75,6 @@ private:
 
 	void* params_;
 	void(*f_)(double t, double y[], double yp[], void* params);
+	void init_(std::string method);
 	void step_(double tout, double tlim, bool lim);
 };

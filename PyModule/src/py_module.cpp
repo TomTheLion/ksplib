@@ -10,5 +10,8 @@ PYBIND11_MODULE(ksplib, m) {
     //sm_kgs.def("simulate_vac_phase", &kerbal_guidance_system::kgs_simulate_vac_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
     //sm_kgs.def("constraint_residuals", &kerbal_guidance_system::kgs_constraint_residuals, "t"_a, "yi"_a, "events"_a, "p"_a);
     //sm_kgs.def("output_time_series", &kerbal_guidance_system::kgs_output_time_series, "t"_a, "yi"_a, "events"_a, "p_atm"_a, "p_vac"_a);
-    sm_kgs.def("test", &kerbal_guidance_system::test);
+    //sm_kgs.def("output_time_series", &kerbal_guidance_system::py_output_atm_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
+    // static py::array_t<double> py_output_atm_phase(double t, py::array_t<double> py_y, py::list py_events, py::dict py_params)
+    sm_kgs.def("output_atm_phase", &kerbal_guidance_system::py_output_atm_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
+    //sm_kgs.def("test", &kerbal_guidance_system::test);
 }
