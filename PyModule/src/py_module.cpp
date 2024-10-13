@@ -3,15 +3,13 @@
 
 PYBIND11_MODULE(ksplib, m) {
     m.doc() = "ksp library module.";
-
     // kerbal guidance system functions
     py::module_ sm_kgs = m.def_submodule("kgs", "kerbal guidance system module");
-    //sm_kgs.def("simulate_atm_phase", &kerbal_guidance_system::py_simulate_atm_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
-    //sm_kgs.def("simulate_vac_phase", &kerbal_guidance_system::kgs_simulate_vac_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
-    //sm_kgs.def("constraint_residuals", &kerbal_guidance_system::kgs_constraint_residuals, "t"_a, "yi"_a, "events"_a, "p"_a);
-    //sm_kgs.def("output_time_series", &kerbal_guidance_system::kgs_output_time_series, "t"_a, "yi"_a, "events"_a, "p_atm"_a, "p_vac"_a);
-    //sm_kgs.def("output_time_series", &kerbal_guidance_system::py_output_atm_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
-    // static py::array_t<double> py_output_atm_phase(double t, py::array_t<double> py_y, py::list py_events, py::dict py_params)
+    sm_kgs.def("simulate_atm_phase", &kerbal_guidance_system::py_simulate_atm_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
     sm_kgs.def("output_atm_phase", &kerbal_guidance_system::py_output_atm_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
-    //sm_kgs.def("test", &kerbal_guidance_system::test);
+    sm_kgs.def("simulate_vac_phase", &kerbal_guidance_system::py_simulate_vac_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
+    sm_kgs.def("simulate_vac_phase_to_velocity", &kerbal_guidance_system::py_simulate_vac_phase_to_velocity, "t"_a, "yi"_a, "events"_a, "p"_a);
+    sm_kgs.def("output_vac_phase", &kerbal_guidance_system::py_output_vac_phase, "t"_a, "yi"_a, "events"_a, "p"_a);
+    sm_kgs.def("constraint_residuals", &kerbal_guidance_system::py_constraint_residuals, "t"_a, "yi"_a, "events"_a, "p"_a);
+    sm_kgs.def("constraint_jacobian", &kerbal_guidance_system::py_constraint_jacobian, "t"_a, "yi"_a, "events"_a, "p"_a);
 }
