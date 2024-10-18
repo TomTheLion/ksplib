@@ -741,7 +741,7 @@ namespace kerbal_guidance_system
 
 		double coast_time = py_params["settings"]["coast_time"].cast<double>();
 		double coast_duration = py_params["settings"]["coast_duration"].cast<double>();
-		double tgf = py_params["settings"]["tgf"].cast<double>();
+		double tgf = py_params["settings"]["u"].cast<py::array_t<double>>().at(6);
 
 		py::array_t<double> py_y;
 		py_util::array_copy(py_yi, py_y);
@@ -766,7 +766,7 @@ namespace kerbal_guidance_system
 		// guidance phase
 		while (vehicle_events.has_next())
 		{
-			double tout = tgf;
+			double tout = coast_time + coast_duration + tgf;
 			double tf = vehicle_events.get_tf() + coast_duration;
 			simulate_vac_phase(t, tout, tf, y, nullptr, vehicle_events, vac_params, integrator_params);
 			if (tf > tout) break;
@@ -800,7 +800,7 @@ namespace kerbal_guidance_system
 
 		double coast_time = py_params["settings"]["coast_time"].cast<double>();
 		double coast_duration = py_params["settings"]["coast_duration"].cast<double>();
-		double tgf = py_params["settings"]["tgf"].cast<double>();
+		double tgf = py_params["settings"]["u"].cast<py::array_t<double>>().at(6);
 
 		std::vector<double> output;
 		output.reserve(1024);
@@ -828,7 +828,7 @@ namespace kerbal_guidance_system
 		// guidance phase
 		while (vehicle_events.has_next())
 		{
-			double tout = tgf;
+			double tout = coast_time + coast_duration + tgf;
 			double tf = vehicle_events.get_tf() + coast_duration;
 			simulate_vac_phase_output(t, tout, tf, y, vehicle_events, vac_params, integrator_params, &output);
 			if (tf > tout) break;
@@ -853,25 +853,27 @@ namespace kerbal_guidance_system
 
 		double coast_time = py_params["settings"]["coast_time"].cast<double>();
 		double coast_duration = py_params["settings"]["coast_duration"].cast<double>();
-		double tgf = py_params["settings"]["tgf"].cast<double>();
+		double tgf = py_params["settings"]["u"].cast<py::array_t<double>>().at(6);
 
 		py::array_t<double> py_y;
 		py_util::array_copy(py_yi, py_y);
 		double* y = py_y.mutable_data();
 
-		// probably should not use f for first since it is used as final in other places
-
-		double ypci[7];
-		double ypcf[7];
-		double ypgf[7];
-		double ypgl[7];
+		double yv[7];
 		double yc[43];
-		double ygf[176];
-		double ygl[176];
-		Eigen::Matrix<double, 13, 13> stml;
-		stml.setIdentity();
+		double yg1[176];
+		double ygn[176];
 
-		// initial phase
+		double ypv[7];
+		double ypc[7];
+		double ypg1[7];
+		double ypgn[7];
+
+		Eigen::Matrix<double, 13, 13> stmn;
+		stmn.setIdentity();
+
+		// velocity guidance phase
+		std::copy(y, y + 7, yv);
 		while (vehicle_events.get_tf() < t)
 			vehicle_events.next();
 
@@ -879,35 +881,71 @@ namespace kerbal_guidance_system
 		{
 			double tout = coast_time;
 			double tf = vehicle_events.get_tf();
-			simulate_vac_phase(t, tout, tf, y, ypci, vehicle_events, vac_params, integrator_params);
+			simulate_vac_phase(t, tout, tf, yv, ypv, vehicle_events, vac_params, integrator_params);
 			if (tf > tout) break;
 			vehicle_events.next();
 		}
 
 		// coast phase
-		std::copy(y, y + 7, yc);
-		simulate_vac_phase_coast_stm(t, coast_time + coast_duration, yc, ypcf, integrator_params);
+		std::copy(yv, yv + 7, yc);
+		simulate_vac_phase_coast_stm(t, coast_time + coast_duration, yc, ypc, integrator_params);
 
+		// active guidance phase
 		// remainder of coast stage
-		std::copy(yc, yc + 7, ygf);
-		double tout = tgf;
+		std::copy(yc, yc + 7, yg1);
+		double tout = coast_time + coast_duration + tgf;
 		double tf = vehicle_events.get_tf() + coast_duration;
-		simulate_vac_phase_stm(t, tout, tf, ygf, ypgf, vehicle_events, vac_params, integrator_params);
-		vehicle_events.next();
+		simulate_vac_phase_stm(t, tout, tf, yg1, ypg1, vehicle_events, vac_params, integrator_params);
 
-		// guidance phase
-		std::copy(ygf, ygf + 7, ygl);
-		while (vehicle_events.has_next())
+		if (tout > tf)
 		{
-			double tout = tgf;
-			double tf = vehicle_events.get_tf() + coast_duration;
-			simulate_vac_phase_stm(t, tout, tf, y, ypgl, vehicle_events, vac_params, integrator_params);
-			if (tf > tout) break;
 			vehicle_events.next();
+
+			std::copy(yg1, yg1 + 7, ygn);
+			while (vehicle_events.has_next())
+			{
+				double tf = vehicle_events.get_tf() + coast_duration;
+				simulate_vac_phase_stm(t, tout, tf, ygn, ypgn, vehicle_events, vac_params, integrator_params);
+				Eigen::Map<Eigen::Matrix<double, 13, 13>> stm(ygn + 7);
+				stmn = stm * stmn;
+				if (tf > tout) break;
+				vehicle_events.next();
+			}
 		}
 
 		// calculate jacobian
+		py::array_t<double> py_jac({ 7, 9 });
+		Eigen::Matrix<double, 7, 9> jact(py_jac.mutable_data());
+		Eigen::Map<Eigen::Matrix<double, 9, 7>> jac(py_jac.mutable_data());
+		jact.setZero();
 
-		return py::make_tuple(t, py_y);
+		Eigen::Map<Eigen::Matrix<double, 13, 13>> stm1(yg1 + 7);
+		Eigen::Matrix<double, 13, 13> stm = stmn * stm1;
+		jact.topLeftCorner<6, 6>() = stm.topRightCorner<6, 6>();
+
+		Eigen::Matrix<double, 7, 7> stmc;
+		stmc.setIdentity();
+		stmc.topLeftCorner<6, 6>() = Eigen::Map<Eigen::Matrix<double, 6, 6>>(yc + 7);
+
+		Eigen::Matrix<double, 7, 7> stm71 = stm1.block<7, 7>(0, 0);
+		Eigen::Matrix<double, 7, 7> stm7n = stmn.block<7, 7>(0, 0);
+
+		Eigen::Map<Eigen::Matrix<double, 7, 1>> x7v(ypv);
+		Eigen::Map<Eigen::Matrix<double, 7, 1>> x71(ypg1);
+
+		Eigen::Map<Eigen::Matrix<double, 7, 1>> x7c(ypc);
+
+
+		Eigen::Map<Eigen::Matrix<double, 7, 1>> x7n(ypgn);
+
+		// need to handle case where we don't do the final stage
+		jact.col(6) = Eigen::Map<Eigen::Matrix<double, 7, 1>>(ypgn);
+		jact.col(7) = stm7n * (stm71 * stmc * x7v - x71) + x7n;
+		jact.col(8) = stm7n * stm71 * x7c;
+
+
+		jac = jact.transpose();
+
+		return py_jac;
 	}
 }
