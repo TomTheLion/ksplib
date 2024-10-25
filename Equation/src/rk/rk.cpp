@@ -132,6 +132,13 @@ namespace rk
 		// set direction of integration
 		d = tout > tt ? 1.0 : -1.0;
 
+		// iflag of 5 indicates incompatible tlim with integration direction
+		if (iflag < 0 && d * (tlim - tt) < 0)
+		{
+			iflag = 5;
+			return;
+		}
+
 		// main integration loop
 		for (int iter = 0; iter < max_iter; iter++)
 		{

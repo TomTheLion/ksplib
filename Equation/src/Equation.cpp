@@ -271,6 +271,9 @@ std::string Equation::get_error_string() const
 		case 4:
 			error_string = "rk returned iflag = 4, integration did not reach TOUT because more than " + std::to_string(max_iter_) + " steps were taken.";
 			break;
+		case 5:
+			error_string = "rk returned iflag = 5, integration did not reach TOUT because TLIM was incompatible with integration direction.";
+			break;
 		default:
 			error_string = "rk returned iflag = " + std::to_string(iflag_) + ".";
 		}

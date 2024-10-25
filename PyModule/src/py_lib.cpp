@@ -65,9 +65,10 @@ namespace kerbal_guidance_system
 		double pitch_time;
 		double pitch_rate;
 		double pitch_max;
+		double thrust_vac;
 		double mass_rate;
 
-		AtmParams(py::dict py_params) :
+		AtmParams(double pitch_rate, double azimuth, py::dict& py_params) :
 			scalar(Scalar(
 				py_params["scalars"]["time"].cast<double>(),
 				py_params["scalars"]["distance"].cast<double>(),
@@ -79,10 +80,11 @@ namespace kerbal_guidance_system
 			thrust(Spl()),
 			angular_velocity(py_util::vector3d(py_params["settings"]["angular_velocity"])),
 			a_limit(py_params["settings"]["a_limit"].cast<double>()),
-			azimuth(py_params["settings"]["azimuth"].cast<double>()),
+			azimuth(azimuth),
 			pitch_time(py_params["settings"]["pitch_time"].cast<double>()),
-			pitch_rate(py_params["settings"]["pitch_rate"].cast<double>()),
-			pitch_max(py_params["settings"]["pitch_max"].cast<double>()),
+			pitch_rate(pitch_rate),
+			pitch_max(pitch_rate * py_params["settings"]["pitch_duration"].cast<double>()),
+			thrust_vac(0.0),
 			mass_rate(0.0)
 		{};
 	};
@@ -96,11 +98,11 @@ namespace kerbal_guidance_system
 		double thrust;
 		double mass_rate;
 
-		VacParams(py::dict py_params) :
-			li(py_util::vector3d(py_params["settings"]["u"])),
-			dli(py_util::vector3d(py_params["settings"]["u"], 3)),
+		VacParams(py::array_t<double>& py_x, py::dict& py_params) :
+			li(py_util::vector3d(py_x)),
+			dli(py_util::vector3d(py_x, 3)),
 			const_accel(false),
-			tgi(py_params["settings"]["tg"].cast<double>()),
+			tgi(py_x.at(7) + py_x.at(8)),
 			a_limit(py_params["settings"]["a_limit"].cast<double>()),
 			thrust(0.0),
 			mass_rate(0.0)
@@ -113,10 +115,10 @@ namespace kerbal_guidance_system
 		double reltol;
 		double abstol;
 
-		IntegratorParams(py::dict py_params) :
-			method(py_params["settings"]["integrator"].cast<std::string>()),
-			reltol(py_params["settings"]["reltol"].cast<double>()),
-			abstol(py_params["settings"]["abstol"].cast<double>())
+		IntegratorParams(py::dict& py_params) :
+			method(py_params["integrator"]["method"].cast<std::string>()),
+			reltol(py_params["integrator"]["reltol"].cast<double>()),
+			abstol(py_params["integrator"]["abstol"].cast<double>())
 		{}
 	};
 
@@ -125,7 +127,7 @@ namespace kerbal_guidance_system
 		size_t i;
 		Scalar scalar;
 
-		VehicleEvents(py::list py_events, py::dict py_params) :
+		VehicleEvents(py::list& py_events, py::dict& py_params) :
 			py_events(py_events), i(0),
 			scalar(
 				py_params["scalars"]["time"].cast<double>(),
@@ -138,9 +140,9 @@ namespace kerbal_guidance_system
 			if (i < py_events.size()) i++;
 		}
 
-		bool has_next() const
+		bool is_valid() const
 		{
-			return i < py_events.size() ? true : false;
+			return i < py_events.size();
 		}
 
 		int get_current() const
@@ -231,7 +233,7 @@ namespace kerbal_guidance_system
 
 		drag_force = atm_params->scalar.ndim(Scalar::Quantity::FORCE, drag_force);
 		thrust = atm_params->scalar.ndim(Scalar::Quantity::FORCE, thrust);
-		double throttle = std::min(1.0, m * atm_params->a_limit / thrust);
+		double throttle = thrust > 0 ? std::min(1.0, m * atm_params->a_limit / atm_params->thrust_vac) : 0.0;
 
 		// set derivatives
 		dr = v;
@@ -244,14 +246,24 @@ namespace kerbal_guidance_system
 		Eigen::Map<Eigen::Vector3d> r(y);
 		Eigen::Map<Eigen::Vector3d> v(y + 3);
 
-		bool altitude_reached = false;
-		while (vehicle_events.has_next())
+		while (vehicle_events.is_valid())
 		{
 			if (vehicle_events.get_stage()) y[6] = vehicle_events.get_mf();
 			atm_params.thrust = vehicle_events.get_spl_thrust();
 			atm_params.mass_rate = vehicle_events.get_mdot();
+			atm_params.thrust_vac = vehicle_events.get_thrust_vac();
 
 			Equation eq = Equation(atm_state_derivatives, 7, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &atm_params);
+
+			auto output_state = [&]()
+				{
+					output->push_back(vehicle_events.get_current());
+					output->push_back(eq.get_tot_iter());
+					output->push_back(eq.get_rej_iter());
+					output->push_back(eq.get_t());
+					for (size_t i = 0; i < 7; i++) output->push_back(eq.get_y(i));
+					for (size_t i = 3; i < 6; i++) output->push_back(eq.get_yp(i));
+				};
 
 			double tf = vehicle_events.get_tf();
 			size_t steps = size_t(500 * (tf - t)) + 1;
@@ -262,39 +274,28 @@ namespace kerbal_guidance_system
 				eq.stepn(t + step * dt, tf);
 				eq.get_y(0, 7, y);
 
-				if (r.dot(v) < 0) throw std::runtime_error("Switch altitude not reached: negative altitude rate.");
-
 				if (r.norm() > switch_altitude)
 				{
 					for (size_t iter = 0; iter < 10; iter++)
 					{
 						double f = r.norm() - switch_altitude;
 						double df = r.dot(v) / r.norm();
-						eq.step(eq.get_t() - f / df);
+						eq.stepn(eq.get_t() - f / df);
 						eq.get_y(0, 7, y);
 						if (abs(f) < 1e-8)
 						{
-							altitude_reached = true;
-							break;
+							t = eq.get_t();
+							if (output) output_state();
+							return;
 						}
 					}
-					if (!altitude_reached) throw std::runtime_error("Switch altitude not reached: refinement iterations exceeded.");
+					return; // refinement iterations exceeded
 				}
 
-				if (output)
-				{
-					output->push_back(vehicle_events.get_current());
-					output->push_back(eq.get_tot_iter());
-					output->push_back(eq.get_rej_iter());
-					output->push_back(eq.get_t());
-					for (size_t i = 0; i < 7; i++) output->push_back(eq.get_y(i));
-					for (size_t i = 3; i < 6; i++) output->push_back(eq.get_yp(i));
-				}
-
-				if (altitude_reached) break;
+				if (output) output_state();
+				if (r.dot(v) < 0) return; // negative altitude reached
 			}
 			t = eq.get_t();
-			if (altitude_reached) return;
 			vehicle_events.next();
 		}
 	}
@@ -375,10 +376,10 @@ namespace kerbal_guidance_system
 
 	// atmospheric python functions
 
-	py::tuple py_simulate_atm_phase(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_params)
+	py::tuple py_simulate_atm_phase(double t, py::array_t<double> py_yi, double pitch_rate, double azimuth, py::list py_events, py::dict py_params)
 	{
 		IntegratorParams integrator_params(py_params);
-		AtmParams atm_params(py_params);
+		AtmParams atm_params(pitch_rate, azimuth, py_params);
 		VehicleEvents vehicle_events(py_events, py_params);
 
 		double switch_altitude = py_params["settings"]["switch_altitude"].cast<double>();
@@ -398,10 +399,10 @@ namespace kerbal_guidance_system
 		return py::make_tuple(t, py_y);
 	}
 
-	py::array_t<double> py_output_atm_phase(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_params)
+	py::array_t<double> py_output_atm_phase(double t, py::array_t<double> py_yi, double pitch_rate, double azimuth, py::list py_events, py::dict py_params)
 	{
 		IntegratorParams integrator_params(py_params);
-		AtmParams atm_params(py_params);
+		AtmParams atm_params(pitch_rate, azimuth, py_params);
 		VehicleEvents vehicle_events(py_events, py_params);
 
 		double switch_altitude = py_params["settings"]["switch_altitude"].cast<double>();
@@ -438,8 +439,58 @@ namespace kerbal_guidance_system
 		// guidance
 		double dt = t - vac_params->tgi;
 		double thrust = vac_params->const_accel ? m * vac_params->a_limit : vac_params->thrust;
-
 		Eigen::Vector3d l = dt > 0.0 ? vac_params->li * cos(dt) + vac_params->dli * sin(dt) : Eigen::Vector3d(v);
+
+		// set derivatives
+		dr = v;
+		dv = -r / pow(r.norm(), 3.0) + l.normalized() * thrust / m;
+		dm = thrust > 0 ? -thrust / vac_params->thrust * vac_params->mass_rate : 0.0;
+	}
+
+	static void vac_state_derivatives_vguidance(double t, double y[], double yp[], void* params)
+	{
+		// params
+		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
+
+		// state
+		Eigen::Map<Eigen::Vector3d> r(y);
+		Eigen::Map<Eigen::Vector3d> v(y + 3);
+		double& m = y[6];
+
+		// state derivatives
+		Eigen::Map<Eigen::Vector3d> dr(yp);
+		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
+		double& dm = yp[6];
+
+		// guidance
+		double thrust = vac_params->const_accel ? m * vac_params->a_limit : vac_params->thrust;
+		Eigen::Vector3d l = Eigen::Vector3d(v);
+
+		// set derivatives
+		dr = v;
+		dv = -r / pow(r.norm(), 3.0) + l.normalized() * thrust / m;
+		dm = thrust > 0 ? -thrust / vac_params->thrust * vac_params->mass_rate : 0.0;
+	}
+
+	static void vac_state_derivatives_aguidance(double t, double y[], double yp[], void* params)
+	{
+		// params
+		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
+
+		// state
+		Eigen::Map<Eigen::Vector3d> r(y);
+		Eigen::Map<Eigen::Vector3d> v(y + 3);
+		double& m = y[6];
+
+		// state derivatives
+		Eigen::Map<Eigen::Vector3d> dr(yp);
+		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
+		double& dm = yp[6];
+
+		// guidance
+		double dt = t - vac_params->tgi;
+		double thrust = vac_params->const_accel ? m * vac_params->a_limit : vac_params->thrust;
+		Eigen::Vector3d l = vac_params->li * cos(dt) + vac_params->dli * sin(dt);
 
 		// set derivatives
 		dr = v;
@@ -466,61 +517,6 @@ namespace kerbal_guidance_system
 	}
 
 	static void vac_state_derivatives_stm(double t, double y[], double yp[], void* params)
-	{
-		// params
-		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
-
-		// state
-		Eigen::Map<Eigen::Vector3d> r(y);
-		Eigen::Map<Eigen::Vector3d> v(y + 3);
-		double& m = y[6];
-
-		// state derivatives
-		Eigen::Map<Eigen::Vector3d> dr(yp);
-		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
-		double& dm = yp[6];
-
-		// state transition matrix
-		Eigen::Map<Eigen::Matrix<double, 13, 13>> stm(y + 7);
-
-		// state transition matrix derivatives
-		Eigen::Map<Eigen::Matrix<double, 13, 13>> dstm(yp + 7);
-		Eigen::Ref<Eigen::Matrix3d> dr_dv = dstm.block<3, 3>(0, 3);
-		Eigen::Ref<Eigen::Matrix3d> dv_dr = dstm.block<3, 3>(3, 0);
-		Eigen::Ref<Eigen::Vector3d> dv_dm = dstm.block<3, 1>(3, 6);
-		Eigen::Ref<Eigen::Matrix<double, 1, 1>> dm_dm = dstm.block<1, 1>(6, 6);
-		Eigen::Ref<Eigen::Matrix3d> dv_dl = dstm.block<3, 3>(3, 7);
-		Eigen::Ref<Eigen::Matrix3d> dl_dld = dstm.block<3, 3>(7, 10);
-		Eigen::Ref<Eigen::Matrix3d> dld_dl = dstm.block<3, 3>(10, 7);
-
-		// guidance
-		double dt = t - vac_params->tgi;
-		double thrust = std::min(m * vac_params->a_limit, vac_params->thrust);
-		double throttle = thrust > 0 ? thrust / vac_params->thrust : 0.0;
-		Eigen::Vector3d l = vac_params->li * cos(dt) + vac_params->dli * sin(dt);
-
-		// set derivatives
-		dr = v;
-		dv = -r / pow(r.norm(), 3.0) + throttle * l.normalized() * vac_params->thrust / m;
-		dm = -throttle * vac_params->mass_rate;
-
-		// set state transition matrix derivatives
-		dstm.setZero();
-
-		dr_dv.setIdentity();
-		dv_dr = 3.0 * r * r.transpose() * pow(r.norm(), -5.0) - Eigen::Matrix3d::Identity() * pow(r.norm(), -3.0);
-		dv_dm = l.normalized() * (throttle < 1.0 ? 0.0 : -vac_params->thrust / m / m);
-		dm_dm << (throttle < 1.0 ? -vac_params->mass_rate * vac_params->a_limit / vac_params->thrust : 0.0);
-		dv_dl = throttle * vac_params->thrust / m * (-l * l.transpose() + Eigen::Matrix3d::Identity() * l.squaredNorm()) * pow(l.norm(), -3.0);
-
-		dl_dld.setIdentity();
-		dld_dl.setIdentity();
-		dld_dl = -dld_dl;
-
-		dstm *= stm;
-	}
-
-	static void vac_state_derivatives_stm_new(double t, double y[], double yp[], void* params)
 	{
 		// params
 		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
@@ -577,7 +573,7 @@ namespace kerbal_guidance_system
 
 		Eigen::Matrix<double, 6, 1> dxd_dm;
 		dxd_dm.setZero();
-		dxd_dm.bottomRows<3>() = (vac_params->const_accel ? 0.0 : 1.0) * -l.normalized() * thrust / m / m;
+		if (!vac_params->const_accel) dxd_dm.bottomRows<3>() = -l.normalized() * thrust / m / m;
 
 		dxd_dm0 = dxd_dx * dx_dm0 + dxd_dm;
 	}
@@ -595,12 +591,10 @@ namespace kerbal_guidance_system
 		double& dm = yp[6];
 
 		// state transition matrix
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> stm(y + 7);
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dx0(y + 7);
 
 		// state transition matrix derivatives
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dstm(yp + 7);
-		Eigen::Ref<Eigen::Matrix3d> dr_dv = dstm.block<3, 3>(0, 3);
-		Eigen::Ref<Eigen::Matrix3d> dv_dr = dstm.block<3, 3>(3, 0);
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dx0(yp + 7);
 
 		// set derivatives
 		dr = v;
@@ -608,20 +602,47 @@ namespace kerbal_guidance_system
 		dm = 0.0;
 
 		// set state transition matrix derivatives
-		dstm.setZero();
-		dr_dv.setIdentity();
-		dv_dr = 3.0 * r * r.transpose() * pow(r.norm(), -5.0) - Eigen::Matrix3d::Identity() * pow(r.norm(), -3.0);
+		Eigen::Matrix<double, 6, 6> dxd_dx;
+		dxd_dx.setZero();
+		dxd_dx.topRightCorner<3, 3>().setIdentity();
+		dxd_dx.bottomLeftCorner<3, 3>() = 3.0 * r * r.transpose() * pow(r.norm(), -5.0) - Eigen::Matrix3d::Identity() * pow(r.norm(), -3.0);
 
-		dstm *= stm;
+		dxd_dx0 = dxd_dx * dx_dx0;
 	}
 
 	static void simulate_vac_phase(double& t, double tout, double tf, double* y, double* yp, VehicleEvents& vehicle_events, VacParams& vac_params, IntegratorParams& integrator_params)
 	{
 		if (vehicle_events.get_stage()) y[6] = vehicle_events.get_mf();
+		vac_params.const_accel = vehicle_events.get_const_accel();
 		vac_params.thrust = vehicle_events.get_thrust_vac();
 		vac_params.mass_rate = vehicle_events.get_mdot();
-		vac_params.const_accel = vehicle_events.get_const_accel();
 		Equation eq = Equation(vac_state_derivatives, 7, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
+		eq.stepn(std::min(tf, tout), tf);
+		t = eq.get_t();
+		eq.get_y(0, 7, y);
+		if (yp) eq.get_yp(0, 7, yp);
+	}
+
+	static void simulate_vac_phase_vguidance(double& t, double tout, double tf, double* y, double* yp, VehicleEvents& vehicle_events, VacParams& vac_params, IntegratorParams& integrator_params)
+	{
+		if (vehicle_events.get_stage()) y[6] = vehicle_events.get_mf();
+		vac_params.const_accel = vehicle_events.get_const_accel();
+		vac_params.thrust = vehicle_events.get_thrust_vac();
+		vac_params.mass_rate = vehicle_events.get_mdot();
+		Equation eq = Equation(vac_state_derivatives_vguidance, 7, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
+		eq.stepn(std::min(tf, tout), tf);
+		t = eq.get_t();
+		eq.get_y(0, 7, y);
+		if (yp) eq.get_yp(0, 7, yp);
+	}
+
+	static void simulate_vac_phase_aguidance(double& t, double tout, double tf, double* y, double* yp, VehicleEvents& vehicle_events, VacParams& vac_params, IntegratorParams& integrator_params)
+	{
+		if (vehicle_events.get_stage()) y[6] = vehicle_events.get_mf();
+		vac_params.const_accel = vehicle_events.get_const_accel();
+		vac_params.thrust = vehicle_events.get_thrust_vac();
+		vac_params.mass_rate = vehicle_events.get_mdot();
+		Equation eq = Equation(vac_state_derivatives_aguidance, 7, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
 		eq.stepn(std::min(tf, tout), tf);
 		t = eq.get_t();
 		eq.get_y(0, 7, y);
@@ -640,9 +661,9 @@ namespace kerbal_guidance_system
 	static void simulate_vac_phase_output(double& t, double tout, double tf, double* y, VehicleEvents& vehicle_events, VacParams& vac_params, IntegratorParams& integrator_params, std::vector<double>* output)
 	{
 		if (vehicle_events.get_stage()) y[6] = vehicle_events.get_mf();
+		vac_params.const_accel = vehicle_events.get_const_accel();
 		vac_params.thrust = vehicle_events.get_thrust_vac();
 		vac_params.mass_rate = vehicle_events.get_mdot();
-		vac_params.const_accel = vehicle_events.get_const_accel();
 		Equation eq = Equation(vac_state_derivatives, 7, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
 
 		size_t steps = size_t(500 * (tf - t)) + 1;
@@ -657,13 +678,10 @@ namespace kerbal_guidance_system
 			output->push_back(eq.get_t());
 			for (size_t i = 0; i < 7; i++) output->push_back(eq.get_y(i));
 			for (size_t i = 3; i < 6; i++) output->push_back(eq.get_yp(i));
-			if (t + step * dt > tout)
-			{
-				t = eq.get_t();
-				eq.get_y(0, 7, y);
-				return;
-			}
+			if (t + step * dt > tout) break;
 		}
+		t = eq.get_t();
+		eq.get_y(0, 7, y);
 	}
 
 	static void simulate_vac_phase_coast_output(double& t, double tout, double* y, VehicleEvents& vehicle_events, IntegratorParams& integrator_params, std::vector<double>* output)
@@ -682,37 +700,18 @@ namespace kerbal_guidance_system
 			output->push_back(eq.get_t());
 			for (size_t i = 0; i < 7; i++) output->push_back(eq.get_y(i));
 			for (size_t i = 3; i < 6; i++) output->push_back(eq.get_yp(i));
-			if (t + step * dt > tout)
-			{
-				t = eq.get_t();
-				eq.get_y(0, 7, y);
-				return;
-			}
 		}
+		t = eq.get_t();
+		eq.get_y(0, 7, y);
 	}
 
 	static void simulate_vac_phase_stm(double& t, double tout, double tf, double* y, double* yp, VehicleEvents& vehicle_events, VacParams& vac_params, IntegratorParams& integrator_params)
 	{
-		Eigen::Map<Eigen::Matrix<double, 13, 13>> stm(y + 7);
-		stm.setIdentity();
 		if (vehicle_events.get_stage()) y[6] = vehicle_events.get_mf();
+		vac_params.const_accel = vehicle_events.get_const_accel();
 		vac_params.thrust = vehicle_events.get_thrust_vac();
 		vac_params.mass_rate = vehicle_events.get_mdot();
-		vac_params.const_accel = vehicle_events.get_const_accel();
-		Equation eq = Equation(vac_state_derivatives_stm, 176, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
-		eq.stepn(std::min(tf, tout), tf);
-		t = eq.get_t();
-		eq.get_y(0, 176, y);
-		if (yp) eq.get_yp(0, 7, yp);
-	}
-
-	static void simulate_vac_phase_stm_new(double& t, double tout, double tf, double* y, double* yp, VehicleEvents& vehicle_events, VacParams& vac_params, IntegratorParams& integrator_params)
-	{
-		if (vehicle_events.get_stage()) y[6] = vehicle_events.get_mf();
-		vac_params.thrust = vehicle_events.get_thrust_vac();
-		vac_params.mass_rate = vehicle_events.get_mdot();
-		vac_params.const_accel = vehicle_events.get_const_accel();
-		Equation eq = Equation(vac_state_derivatives_stm_new, 86, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
+		Equation eq = Equation(vac_state_derivatives_stm, 86, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
 		eq.stepn(std::min(tf, tout), tf);
 		t = eq.get_t();
 		eq.get_y(0, 86, y);
@@ -734,12 +733,15 @@ namespace kerbal_guidance_system
 		Eigen::Map<Eigen::Vector3d> v(y + 3);
 		Eigen::Vector3d a;
 
-		while (vehicle_events.has_next())
+		while (vehicle_events.get_tf() < t)
+			vehicle_events.next();
+
+		while (vehicle_events.is_valid())
 		{
 			if (vehicle_events.get_stage()) y[6] = vehicle_events.get_mf();
+			vac_params.const_accel = vehicle_events.get_const_accel();
 			vac_params.thrust = vehicle_events.get_thrust_vac();
 			vac_params.mass_rate = vehicle_events.get_mdot();
-			vac_params.const_accel = vehicle_events.get_const_accel();
 
 			Equation eq = Equation(vac_state_derivatives, 7, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
 
@@ -759,7 +761,7 @@ namespace kerbal_guidance_system
 						eq.get_yp(3, 3, a.data());
 						double f = v.norm() - final_velocity;
 						double df = v.dot(a) / v.norm();
-						eq.step(eq.get_t() - f / df);
+						eq.stepn(eq.get_t() - f / df);
 						eq.get_y(0, 7, y);
 						if (abs(f) < 1e-8)
 						{
@@ -767,7 +769,7 @@ namespace kerbal_guidance_system
 							return;
 						}
 					}
-					throw std::runtime_error("Final velocity not reached: refinement iterations exceeded.");
+					return; // refinement iterations exceeded
 				}
 			}
 			t = eq.get_t();
@@ -817,15 +819,15 @@ namespace kerbal_guidance_system
 	}
 
 	// vacuum python functions
-	py::tuple py_simulate_vac_phase(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_params)
+	py::tuple py_simulate_vac_phase(double t, py::array_t<double> py_yi, py::array_t<double> py_x, py::list py_events, py::dict py_params)
 	{
 		IntegratorParams integrator_params(py_params);
-		VacParams vac_params(py_params);
+		VacParams vac_params(py_x, py_params);
 		VehicleEvents vehicle_events(py_events, py_params);
 
-		double coast_time = py_params["settings"]["coast_time"].cast<double>();
-		double coast_duration = py_params["settings"]["coast_duration"].cast<double>();
-		double dtg = py_params["settings"]["u"].cast<py::array_t<double>>().at(6);
+		double dtg = py_x.at(6);
+		double coast_time = py_x.at(7);
+		double coast_duration = py_x.at(8);
 
 		py::array_t<double> py_y;
 		py_util::array_copy(py_yi, py_y);
@@ -835,7 +837,7 @@ namespace kerbal_guidance_system
 		while (vehicle_events.get_tf() < t)
 			vehicle_events.next();
 
-		while (true)
+		while (vehicle_events.is_valid())
 		{
 			double tout = coast_time;
 			double tf = vehicle_events.get_tf();
@@ -848,7 +850,7 @@ namespace kerbal_guidance_system
 		simulate_vac_phase_coast(t, coast_time + coast_duration, y, nullptr, integrator_params);
 
 		// guidance phase
-		while (true)
+		while (vehicle_events.is_valid())
 		{
 			double tout = vac_params.tgi + dtg;
 			double tf = vehicle_events.get_tf() + coast_duration;
@@ -860,13 +862,11 @@ namespace kerbal_guidance_system
 		return py::make_tuple(t, py_y);
 	}
 
-	py::tuple py_simulate_vac_phase_to_velocity(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_params)
+	py::tuple py_simulate_vac_phase_to_velocity(double t, py::array_t<double> py_yi, py::array_t<double> py_x, double final_velocity, py::list py_events, py::dict py_params)
 	{
 		IntegratorParams integrator_params(py_params);
-		VacParams vac_params(py_params);
+		VacParams vac_params(py_x, py_params);
 		VehicleEvents vehicle_events(py_events, py_params);
-
-		double final_velocity = py_params["settings"]["final_velocity"].cast<double>();
 
 		py::array_t<double> py_y;
 		py_util::array_copy(py_yi, py_y);
@@ -876,15 +876,15 @@ namespace kerbal_guidance_system
 		return py::make_tuple(t, py_y);
 	}
 
-	py::array_t<double> py_output_vac_phase(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_params)
+	py::array_t<double> py_output_vac_phase(double t, py::array_t<double> py_yi, py::array_t<double> py_x, py::list py_events, py::dict py_params)
 	{
 		IntegratorParams integrator_params(py_params);
-		VacParams vac_params(py_params);
+		VacParams vac_params(py_x, py_params);
 		VehicleEvents vehicle_events(py_events, py_params);
 
-		double coast_time = py_params["settings"]["coast_time"].cast<double>();
-		double coast_duration = py_params["settings"]["coast_duration"].cast<double>();
-		double dtg = py_params["settings"]["u"].cast<py::array_t<double>>().at(6);
+		double dtg = py_x.at(6);
+		double coast_time = py_x.at(7);
+		double coast_duration = py_x.at(8);
 
 		std::vector<double> output;
 		output.reserve(1024);
@@ -897,7 +897,7 @@ namespace kerbal_guidance_system
 		while (vehicle_events.get_tf() < t)
 			vehicle_events.next();
 
-		while (vehicle_events.has_next())
+		while (vehicle_events.is_valid())
 		{
 			double tout = coast_time;
 			double tf = vehicle_events.get_tf();
@@ -910,7 +910,7 @@ namespace kerbal_guidance_system
 		simulate_vac_phase_coast_output(t, coast_time + coast_duration, y, vehicle_events, integrator_params, &output);
 
 		// guidance phase
-		while (vehicle_events.has_next())
+		while (vehicle_events.is_valid())
 		{
 			double tout = vac_params.tgi + dtg;
 			double tf = vehicle_events.get_tf() + coast_duration;
@@ -920,148 +920,83 @@ namespace kerbal_guidance_system
 		}
 
 		py::array_t<double> py_rdim_output({ int(output.size() / 14), 26 });
-		rdim_atm_output(output, py_rdim_output, py_params);
+		rdim_vac_output(output, py_rdim_output, py_params);
 		return py_rdim_output;
 	}
 
-	py::array_t<double> py_constraint_residuals(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_params)
-	{
-		return py_yi;
-	}
-	
-	py::array_t<double> py_constraint_jacobian_(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_params)
+	py::array_t<double> py_constraint_residuals(double t, py::array_t<double> py_yi, py::array_t<double> py_x, py::array_t<double> py_c, py::list py_events, py::dict py_params)
 	{
 		IntegratorParams integrator_params(py_params);
-		VacParams vac_params(py_params);
+		VacParams vac_params(py_x, py_params);
 		VehicleEvents vehicle_events(py_events, py_params);
 
-		double coast_time = py_params["settings"]["coast_time"].cast<double>();
-		double coast_duration = py_params["settings"]["coast_duration"].cast<double>();
-		double tgf = py_params["settings"]["u"].cast<py::array_t<double>>().at(6);
+		int mode = py_c.size() - 3;
+		double dtg = py_x.at(6);
+		double coast_time = py_x.at(7);
+		double coast_duration = py_x.at(8);
+		double* c = py_c.mutable_data();
 
 		py::array_t<double> py_y;
 		py_util::array_copy(py_yi, py_y);
 		double* y = py_y.mutable_data();
 
-		double yv[7];
-		double yc[43];
-		double yg1[176];
-		double ygn[176];
-
-		double ypv[7];
-		double ypc[7];
-		double ypg1[7];
-		double ypgn[7];
-
-		Eigen::Matrix<double, 13, 13> stmn;
-		stmn.setIdentity();
-
-		// velocity guidance phase
-		std::copy(y, y + 7, yv);
+		// initial phase
 		while (vehicle_events.get_tf() < t)
 			vehicle_events.next();
 
-		while (vehicle_events.has_next())
+		while (vehicle_events.is_valid())
 		{
 			double tout = coast_time;
 			double tf = vehicle_events.get_tf();
-			simulate_vac_phase(t, tout, tf, yv, ypv, vehicle_events, vac_params, integrator_params);
+			simulate_vac_phase_vguidance(t, tout, tf, y, nullptr, vehicle_events, vac_params, integrator_params);
 			if (tf > tout) break;
 			vehicle_events.next();
 		}
 
 		// coast phase
-		std::copy(yv, yv + 7, yc);
-		simulate_vac_phase_coast_stm(t, coast_time + coast_duration, yc, ypc, integrator_params);
+		simulate_vac_phase_coast(t, coast_time + coast_duration, y, nullptr, integrator_params);
 
-		// active guidance phase
-		// remainder of coast stage
-		std::copy(yc, yc + 7, yg1);
-		double tout = coast_time + coast_duration + tgf;
-		double tf = vehicle_events.get_tf() + coast_duration;
-		simulate_vac_phase_stm(t, tout, tf, yg1, ypg1, vehicle_events, vac_params, integrator_params);
-
-		if (tout > tf)
+		// guidance phase
+		while (vehicle_events.is_valid())
 		{
+			double tout = vac_params.tgi + dtg;
+			double tf = vehicle_events.get_tf() + coast_duration;
+			simulate_vac_phase_aguidance(t, tout, tf, y, nullptr, vehicle_events, vac_params, integrator_params);
+			if (tf > tout) break;
 			vehicle_events.next();
-
-			std::copy(yg1, yg1 + 7, ygn);
-			while (vehicle_events.has_next())
-			{
-				double tf = vehicle_events.get_tf() + coast_duration;
-				simulate_vac_phase_stm(t, tout, tf, ygn, ypgn, vehicle_events, vac_params, integrator_params);
-				Eigen::Map<Eigen::Matrix<double, 13, 13>> stm(ygn + 7);
-				stmn = stm * stmn;
-				if (tf > tout) break;
-				vehicle_events.next();
-			}
 		}
 
-		// calculate jacobian
-		py::array_t<double> py_jac({ 7, 9 });
-		Eigen::Matrix<double, 7, 9> jact(py_jac.mutable_data());
-		Eigen::Map<Eigen::Matrix<double, 9, 7>> jac(py_jac.mutable_data());
-		jact.setZero();
+		Eigen::Vector3d rf(y);
+		Eigen::Vector3d vf(y + 3);
+		Eigen::Vector3d lf = vac_params.li * cos(dtg) + vac_params.dli * sin(dtg);
+		Eigen::Vector3d dlf = -vac_params.li * sin(dtg) + vac_params.dli * cos(dtg);
 
-		Eigen::Map<Eigen::Matrix<double, 13, 13>> stm1(yg1 + 7);
-		Eigen::Matrix<double, 13, 13> stm = stmn * stm1;
-		jact.topLeftCorner<6, 6>() = stm.topRightCorner<6, 6>();
+		py::array_t<double> py_residual;
+		py_residual.resize({ 7 });
+		Eigen::Map<Eigen::Matrix<double, 7, 1>> residual(py_residual.mutable_data());
 
-		Eigen::Matrix<double, 7, 7> stmc;
-		stmc.setIdentity();
-		stmc.topLeftCorner<6, 6>() = Eigen::Map<Eigen::Matrix<double, 6, 6>>(yc + 7);
+		switch (mode)
+		{
+		case 0:
+			residual << rf.dot(rf) - c[0], vf.dot(vf) - c[1], rf.dot(vf) - c[2], rf.cross(dlf) - vf.cross(lf), dlf.norm() - 1.0;
+			break;
+		}
 
-		Eigen::Matrix<double, 7, 7> stm71 = stm1.block<7, 7>(0, 0);
-		Eigen::Matrix<double, 7, 7> stm7n = stmn.block<7, 7>(0, 0);
-
-		Eigen::Map<Eigen::Matrix<double, 7, 1>> x7v(ypv);
-		Eigen::Map<Eigen::Matrix<double, 7, 1>> x71(ypg1);
-
-		Eigen::Map<Eigen::Matrix<double, 7, 1>> x7c(ypc);
-
-
-		Eigen::Map<Eigen::Matrix<double, 7, 1>> x7n(ypgn);
-
-		// need to handle case where we don't do the final stage
-		jact.col(6) = Eigen::Map<Eigen::Matrix<double, 7, 1>>(ypgn);
-		jact.col(7) = stm7n * (stm71 * stmc * x7v - x71) + x7n;
-		jact.col(8) = stm7n * stm71 * x7c;
-
-
-		std::cout << stm1 << '\n' << '\n';
-		std::cout << stm << '\n' << '\n';
-
-		// residuals...
-		// d r dot r wrt u
-		// d v dot v
-		// d r dot v
-
-		Eigen::Matrix<double, 1, 9> drdotr_du = 2.0 * Eigen::Map<Eigen::Matrix<double, 1, 3>>(ygn) * jact.topRows(3);
-
-		std::cout << "rdotr" << '\n';
-		std::cout << drdotr_du << '\n' << '\n';;
-
-		std::cout << stm << '\n';
-
-		jac = jact.transpose();
-
-		return py_jac;
+		return py_residual;
 	}
-
-	py::array_t<double> py_constraint_jacobian(double t, py::array_t<double> py_yi, py::list py_events, py::dict py_params)
+	
+	py::array_t<double> py_constraint_jacobian(double t, py::array_t<double> py_yi, py::array_t<double> py_x, py::array_t<double> py_c, py::list py_events, py::dict py_params)
 	{
 		IntegratorParams integrator_params(py_params);
-		VacParams vac_params(py_params);
+		VacParams vac_params(py_x, py_params);
 		VehicleEvents vehicle_events(py_events, py_params);
 
-		double coast_time = py_params["settings"]["coast_time"].cast<double>();
-		double coast_duration = py_params["settings"]["coast_duration"].cast<double>();
-		double dtg = py_params["settings"]["u"].cast<py::array_t<double>>().at(6);
+		int mode = py_c.size() - 3;
+		double dtg = py_x.at(6);
+		double coast_time = py_x.at(7);
+		double coast_duration = py_x.at(8);
 
-		py::array_t<double> py_y;
-		py_util::array_copy(py_yi, py_y);
-		double* y = py_y.mutable_data();
-
+		double yf[7];
 		double yv[7];
 		double yc[43];
 		double yg1[86];
@@ -1073,17 +1008,18 @@ namespace kerbal_guidance_system
 		double ypgn[7];
 
 		Eigen::Matrix<double, 6, 9> dy_du;
+		Eigen::Matrix<double, 7, 9> dc_du;
 
 		// velocity guidance phase
-		std::copy(y, y + 7, yv);
+		std::copy(py_yi.mutable_data(), py_yi.mutable_data() + 7, yv);
 		while (vehicle_events.get_tf() < t)
 			vehicle_events.next();
 
-		while (true)
+		while (vehicle_events.is_valid())
 		{
 			double tout = coast_time;
 			double tf = vehicle_events.get_tf();
-			simulate_vac_phase(t, tout, tf, yv, ypv, vehicle_events, vac_params, integrator_params);
+			simulate_vac_phase_vguidance(t, tout, tf, yv, ypv, vehicle_events, vac_params, integrator_params);
 			if (tf > tout) break;
 			vehicle_events.next();
 		}
@@ -1094,7 +1030,7 @@ namespace kerbal_guidance_system
 		yc_dx_dx0.setIdentity();
 		simulate_vac_phase_coast_stm(t, coast_time + coast_duration, yc, ypc, integrator_params);
 
-		// active guidance phase
+		// guidance phase
 		// remainder of coast stage
 		std::copy(yc, yc + 7, yg1);
 		Eigen::Map<Eigen::Matrix<double, 6, 6>> yg1_dx_dx0(yg1 + 7);
@@ -1105,11 +1041,11 @@ namespace kerbal_guidance_system
 		yg1_dx_dm0.setZero();
 		double tout = vac_params.tgi + dtg;
 		double tf = vehicle_events.get_tf() + coast_duration;
-		simulate_vac_phase_stm_new(t, tout, tf, yg1, ypg1, vehicle_events, vac_params, integrator_params);
+		simulate_vac_phase_stm(t, tout, tf, yg1, ypg1, vehicle_events, vac_params, integrator_params);
 
 		if (tf > tout)
 		{
-			std::cout << "ended on first." << '\n';
+			std::copy(yg1, yg1 + 7, yf);
 			dy_du.leftCols<6>() = yg1_dx_dl0;
 			dy_du.col(6) = Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypg1);
 			dy_du.col(7) = yg1_dx_dx0 * yc_dx_dx0 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypv) + yg1_dx_dm0 * ypv[6];
@@ -1117,8 +1053,8 @@ namespace kerbal_guidance_system
 		}
 		else
 		{
-			std::cout << "first stage." << " " << vehicle_events.get_current() << " " << t << " " << vehicle_events.get_tf() + coast_duration << " " << tout << '\n';
-	
+			vehicle_events.next();
+			std::copy(yg1, yg1 + 7, ygn);
 			Eigen::Map<Eigen::Matrix<double, 6, 6>> ygn_dx_dx0(ygn + 7);
 			Eigen::Map<Eigen::Matrix<double, 6, 6>> ygn_dx_dl0(ygn + 43);
 			Eigen::Map<Eigen::Matrix<double, 6, 1>> ygn_dx_dm0(ygn + 79);
@@ -1126,33 +1062,54 @@ namespace kerbal_guidance_system
 			ygn_dx_dl0.setZero();
 			ygn_dx_dm0.setZero();
 
-			vehicle_events.next();
-			std::copy(yg1, yg1 + 7, ygn);
-			while (true)
+			while (vehicle_events.is_valid())
 			{
-				std::cout << "additional stage." << " " << vehicle_events.get_current() << " " << t << " " << vehicle_events.get_tf() + coast_duration << " " << tout << '\n';
 				double tf = vehicle_events.get_tf() + coast_duration;
-				simulate_vac_phase_stm_new(t, tout, tf, ygn, ypgn, vehicle_events, vac_params, integrator_params);
+				simulate_vac_phase_stm(t, tout, tf, ygn, ypgn, vehicle_events, vac_params, integrator_params);
 				if (tf > tout) break;
 				vehicle_events.next();
 			}
 
-			dy_du.leftCols<6>() = ygn_dx_dx0 * yg1_dx_dl0 + ygn_dx_dl0;
-			dy_du.col(6) = Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypgn);
-
 			Eigen::Matrix<double, 6, 1> dl_dt;
 			dl_dt << vac_params.dli, -vac_params.li;
 
+			std::copy(ygn, ygn + 7, yf);
+			dy_du.leftCols<6>() = ygn_dx_dx0 * yg1_dx_dl0 + ygn_dx_dl0;
+			dy_du.col(6) = Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypgn);
 			dy_du.col(7) = ygn_dx_dx0 * (yg1_dx_dx0 * yc_dx_dx0 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypv) + yg1_dx_dm0 * ypv[6] - Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypg1)) + Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypgn) - ygn_dx_dl0 * dl_dt;
 			dy_du.col(8) = ygn_dx_dx0 * yg1_dx_dx0 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypc);
-
-			std::cout << t << " " << Eigen::Map<Eigen::Matrix<double, 6, 1>>(ygn).transpose() << '\n';
 		}
 		
+		Eigen::Vector3d rf(yf);
+		Eigen::Vector3d vf(yf + 3);
+		Eigen::Vector3d lf = vac_params.li * cos(dtg) + vac_params.dli * sin(dtg);
+		Eigen::Vector3d dlf = -vac_params.li * sin(dtg) + vac_params.dli * cos(dtg);
 
-		py::array_t<double> py_jac({ 6, 9 });
-		Eigen::Map<Eigen::Matrix<double, 9, 6>> jac(py_jac.mutable_data());
-		jac = dy_du.transpose();
+		Eigen::Matrix<double, 6, 9> dlf_du;
+		dlf_du.setZero();
+		dlf_du.block<3, 3>(0, 0) = cos(dtg) * Eigen::Matrix3d::Identity();
+		dlf_du.block<3, 3>(0, 3) = sin(dtg) * Eigen::Matrix3d::Identity();
+		dlf_du.block<3, 3>(3, 0) = -sin(dtg) * Eigen::Matrix3d::Identity();
+		dlf_du.block<3, 3>(3, 3) = cos(dtg) * Eigen::Matrix3d::Identity();
+		dlf_du.col(6) << dlf, -lf;
+
+		Eigen::Vector3d dmdlf_ddlf = dlf / dlf.norm();
+
+		switch (mode)
+		{
+		case 0:
+			dc_du.row(0) = 2.0 * rf.transpose() * dy_du.topRows(3);
+			dc_du.row(1) = 2.0 * vf.transpose() * dy_du.bottomRows(3);
+			dc_du.row(2) = rf.transpose() * dy_du.bottomRows(3) + vf.transpose() * dy_du.topRows(3);
+			for (size_t i = 0; i < 9; i++)
+				dc_du.block<3, 1>(3, i) = dy_du.block<3, 1>(0, i).cross(dlf) + rf.cross(dlf_du.block<3, 1>(3, i)) - dy_du.block<3, 1>(3, i).cross(lf) - vf.cross(dlf_du.block<3, 1>(0, i));
+			dc_du.row(6) = dmdlf_ddlf.transpose() * dlf_du.bottomRows(3);
+			break;
+		}
+
+		py::array_t<double> py_jac({ 7, 9 });
+		Eigen::Map<Eigen::Matrix<double, 9, 7>> jac(py_jac.mutable_data());
+		jac = dc_du.transpose();
 
 		return py_jac;
 	}
