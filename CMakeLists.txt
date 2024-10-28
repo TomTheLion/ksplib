@@ -10,10 +10,10 @@ include_directories(C:/dev/includes/eigen)
 include_directories(C:/dev/includes/nlopt-2.7.1/src/api)
 include_directories(nlopt)
 
-include_directories(Spl/src)
 include_directories(Scalar/src)
 include_directories(Equation/src)
 include_directories(PyModule/src)
+
  #[[
 add_executable(
 	testing
@@ -32,16 +32,14 @@ add_executable(
 
 pybind11_add_module(
 	ksplib
-	Spl/src/Spl.cpp
 	Scalar/src/Scalar.cpp
 	Equation/src/rk/rk32.cpp
 	Equation/src/rk/rk54.cpp
 	Equation/src/rk/rk853.cpp
 	Equation/src/rk/rk.cpp
-	Equation/src/ode/wrapode.cpp
-	Equation/src/ode/ode.cpp
 	Equation/src/Equation.cpp
-	PyModule/src/py_lib.cpp
+	PyModule/src/py_util.cpp
+	PyModule/src/py_kgs.cpp
 	PyModule/src/py_module.cpp
 )
 

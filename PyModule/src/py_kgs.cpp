@@ -1,64 +1,22 @@
 #include <iostream>
 #include <iomanip>
-#include <Eigen/Dense>
 
 #include "py_lib.h"
 
 #include "Equation.h"
-#include "Spl.h"
 #include "Scalar.h"
 
-namespace py_util
-{
-	static size_t array_size(py::object obj)
-	{
-		return obj.cast <py::array_t<double>>().size();
-	}
-
-	static double* array_ptr(py::object obj)
-	{
-		return obj.cast <py::array_t<double>>().mutable_data();
-	}
-
-	static void array_copy(py::array_t<double> src, py::array_t<double> dst)
-	{
-		dst.resize({ src.size() });
-		std::copy(src.mutable_data(), src.mutable_data() + src.size(), dst.mutable_data());
-	}
-
-	static void array_copy(std::vector<double> src, py::array_t<double> dst)
-	{
-		dst.resize({ src.size() });
-		std::copy(src.data(), src.data() + src.size(), dst.mutable_data());
-	}
-
-	static Eigen::Vector3d vector3d(py::object obj, int n)
-	{
-		return Eigen::Vector3d(obj.cast<py::array_t<double>>().mutable_data() + n);
-	}
-
-	static Eigen::Vector3d vector3d(py::object obj)
-	{
-		return Eigen::Vector3d(obj.cast<py::array_t<double>>().mutable_data());
-	}
-
-	static Spl spline(py::object obj)
-	{
-		py::tuple tup = obj;
-		return Spl(array_ptr(tup[0]), array_ptr(tup[1]), array_size(tup[0]), tup[2].cast<size_t>());
-	}
-}
 
 namespace kerbal_guidance_system
 {
 	// structs
 	struct AtmParams {
 		Scalar scalar;
-		Spl pressure;
-		Spl density;
-		Spl drag;
-		Spl drag_mul;
-		Spl thrust;
+		py_util::Spl pressure;
+		py_util::Spl density;
+		py_util::Spl drag;
+		py_util::Spl drag_mul;
+		py_util::Spl thrust;
 		Eigen::Vector3d angular_velocity;
 		double a_limit;
 		double azimuth;
@@ -77,7 +35,7 @@ namespace kerbal_guidance_system
 			density(py_util::spline(py_params["splines"]["density"])),
 			drag(py_util::spline(py_params["splines"]["drag"])),
 			drag_mul(py_util::spline(py_params["splines"]["drag_mul"])),
-			thrust(Spl()),
+			thrust(py_util::Spl()),
 			angular_velocity(py_util::vector3d(py_params["settings"]["angular_velocity"])),
 			a_limit(py_params["settings"]["a_limit"].cast<double>()),
 			azimuth(azimuth),
@@ -195,9 +153,9 @@ namespace kerbal_guidance_system
 			return scalar.ndim(Scalar::Quantity::FORCE, py_events[i].cast<py::tuple>()[6].cast<double>());
 		}
 
-		Spl get_spl_thrust() const
+		py_util::Spl get_spl_thrust() const
 		{
-			return py_events[i].cast<py::tuple>()[7].is_none() ? Spl() : py_util::spline(py_events[i].cast<py::tuple>()[7]);
+			return py_events[i].cast<py::tuple>()[7].is_none() ? py_util::Spl() : py_util::spline(py_events[i].cast<py::tuple>()[7]);
 		}
 	};
 
@@ -330,10 +288,10 @@ namespace kerbal_guidance_system
 			py_params["scalars"]["distance"].cast<double>(),
 			py_params["scalars"]["mass"].cast<double>());
 
-		Spl spl_pressure = py_util::spline(py_params["splines"]["pressure"]);
-		Spl spl_density = py_util::spline(py_params["splines"]["density"]);
-		Spl spl_drag = py_util::spline(py_params["splines"]["drag"]);
-		Spl spl_drag_mul = py_util::spline(py_params["splines"]["drag_mul"]);
+		py_util::Spl spl_pressure = py_util::spline(py_params["splines"]["pressure"]);
+		py_util::Spl spl_density = py_util::spline(py_params["splines"]["density"]);
+		py_util::Spl spl_drag = py_util::spline(py_params["splines"]["drag"]);
+		py_util::Spl spl_drag_mul = py_util::spline(py_params["splines"]["drag_mul"]);
 
 		Eigen::Vector3d angular_velocity = py_util::vector3d(py_params["settings"]["angular_velocity"]);
 		Eigen::Vector3d rdim_angular_velocity = scalar.rdim(Scalar::Quantity::RATE, 1.0) * angular_velocity;
@@ -431,7 +389,7 @@ namespace kerbal_guidance_system
 	}
 
 	// vacuum functions
-	static void vac_state_derivatives_vguidance(double t, double y[], double yp[], void* params)
+	static void vac_state_derivatives_passive_guidance(double t, double y[], double yp[], void* params)
 	{
 		// params
 		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
@@ -456,7 +414,7 @@ namespace kerbal_guidance_system
 		dm = thrust > 0 ? -thrust / vac_params->thrust * vac_params->mass_rate : 0.0;
 	}
 
-	static void vac_state_derivatives_aguidance(double t, double y[], double yp[], void* params)
+	static void vac_state_derivatives_active_guidance(double t, double y[], double yp[], void* params)
 	{
 		// params
 		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
@@ -502,6 +460,109 @@ namespace kerbal_guidance_system
 
 	static void vac_state_derivatives_stm(double t, double y[], double yp[], void* params)
 	{
+		// params
+		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
+
+		// state
+		Eigen::Map<Eigen::Vector3d> r(y);
+		Eigen::Map<Eigen::Vector3d> v(y + 3);
+		double& m = y[6];
+
+		// state derivatives
+		Eigen::Map<Eigen::Vector3d> dr(yp);
+		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
+		double& dm = yp[6];
+
+		// state transition matrices
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dxi(y + 7);
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dLi(y + 43);
+		Eigen::Map<Eigen::Matrix<double, 6, 1>> dx_dmi(y + 79);
+
+		// state transition derivative matrices
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dxi(yp + 7);
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dLi(yp + 43);
+		Eigen::Map<Eigen::Matrix<double, 6, 1>> dxd_dmi(yp + 79);
+
+		// guidance
+		double dt = t - vac_params->tgi;
+		double thrust = vac_params->const_accel ? m * vac_params->a_limit : vac_params->thrust;
+		Eigen::Vector3d l = vac_params->li * cos(dt) + vac_params->ldi * sin(dt);
+
+		// set derivatives
+		dr = v;
+		dv = -r / pow(r.norm(), 3.0) + l.normalized() * thrust / m;
+		dm = thrust > 0 ? -thrust / vac_params->thrust * vac_params->mass_rate : 0.0;
+
+		// set state transition derivative matrices
+		Eigen::Matrix<double, 6, 6> dxd_dx = Eigen::Matrix<double, 6, 6>::Zero();
+		dxd_dx.topRightCorner<3, 3>().setIdentity();
+		dxd_dx.bottomLeftCorner<3, 3>() = 3.0 * r * r.transpose() * pow(r.norm(), -5.0) - Eigen::Matrix3d::Identity() * pow(r.norm(), -3.0);
+
+		dxd_dxi = dxd_dx * dx_dxi;
+
+		Eigen::Matrix<double, 6, 3> dxd_dl = Eigen::Matrix<double, 6, 3>::Zero();
+		dxd_dl.bottomRows<3>() = thrust / m * (-l * l.transpose() + Eigen::Matrix3d::Identity() * l.squaredNorm()) * pow(l.norm(), -3.0);
+
+		Eigen::Matrix<double, 3, 6> dl_dLi;
+		dl_dLi.leftCols<3>() = cos(dt) * Eigen::Matrix3d::Identity();
+		dl_dLi.rightCols<3>() = sin(dt) * Eigen::Matrix3d::Identity();
+
+		dxd_dLi = dxd_dx * dx_dLi + dxd_dl * dl_dLi;
+
+		Eigen::Matrix<double, 6, 1> dxd_dm = Eigen::Matrix<double, 6, 1>::Zero();
+		if (!vac_params->const_accel) dxd_dm.bottomRows<3>() = -l.normalized() * thrust / m / m;
+
+		dxd_dmi = dxd_dx * dx_dmi + dxd_dm;
+	}
+
+	static void vac_state_derivatives_active_guidance_stm(double t, double y[], double yp[], void* params)
+	{
+		// params
+		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
+
+		// state
+		Eigen::Map<Eigen::Vector3d> r(y);
+		Eigen::Map<Eigen::Vector3d> v(y + 3);
+		double& m = y[6];
+
+		// state derivatives
+		Eigen::Map<Eigen::Vector3d> dr(yp);
+		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
+		double& dm = yp[6];
+
+		// state transition matrices
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dLi(y + 7);
+
+		// state transition derivative matrices
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dLi(yp + 7);
+
+		// guidance
+		double dt = t - vac_params->tgi;
+		double thrust = vac_params->const_accel ? m * vac_params->a_limit : vac_params->thrust;
+		Eigen::Vector3d l = vac_params->li * cos(dt) + vac_params->ldi * sin(dt);
+
+		// set derivatives
+		dr = v;
+		dv = -r / pow(r.norm(), 3.0) + l.normalized() * thrust / m;
+		dm = thrust > 0 ? -thrust / vac_params->thrust * vac_params->mass_rate : 0.0;
+
+		// set state transition derivative matrices
+		Eigen::Matrix<double, 6, 6> dxd_dx = Eigen::Matrix<double, 6, 6>::Zero();
+		dxd_dx.topRightCorner<3, 3>().setIdentity();
+		dxd_dx.bottomLeftCorner<3, 3>() = 3.0 * r * r.transpose() * pow(r.norm(), -5.0) - Eigen::Matrix3d::Identity() * pow(r.norm(), -3.0);
+
+		Eigen::Matrix<double, 6, 3> dxd_dl = Eigen::Matrix<double, 6, 3>::Zero();
+		dxd_dl.bottomRows<3>() = thrust / m * (-l * l.transpose() + Eigen::Matrix3d::Identity() * l.squaredNorm()) * pow(l.norm(), -3.0);
+
+		Eigen::Matrix<double, 3, 6> dl_dLi;
+		dl_dLi.leftCols<3>() = cos(dt) * Eigen::Matrix3d::Identity();
+		dl_dLi.rightCols<3>() = sin(dt) * Eigen::Matrix3d::Identity();
+
+		dxd_dLi = dxd_dx * dx_dLi + dxd_dl * dl_dLi;
+	}
+
+	static void vac_state_derivatives_coast_stm(double t, double y[], double yp[], void* params)
+	{
 		// state
 		Eigen::Map<Eigen::Vector3d> r(y);
 		Eigen::Map<Eigen::Vector3d> v(y + 3);
@@ -513,10 +574,10 @@ namespace kerbal_guidance_system
 		double& dm = yp[6];
 
 		// state transition matrix
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dx0(y + 7);
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dxi(y + 7);
 
 		// state transition matrix derivatives
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dx0(yp + 7);
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dxi(yp + 7);
 
 		// set derivatives
 		dr = v;
@@ -524,124 +585,11 @@ namespace kerbal_guidance_system
 		dm = 0.0;
 
 		// set state transition matrix derivatives
-		Eigen::Matrix<double, 6, 6> dxd_dx;
-		dxd_dx.setZero();
+		Eigen::Matrix<double, 6, 6> dxd_dx = Eigen::Matrix<double, 6, 6>::Zero();
 		dxd_dx.topRightCorner<3, 3>().setIdentity();
 		dxd_dx.bottomLeftCorner<3, 3>() = 3.0 * r * r.transpose() * pow(r.norm(), -5.0) - Eigen::Matrix3d::Identity() * pow(r.norm(), -3.0);
 
-		dxd_dx0 = dxd_dx * dx_dx0;
-	}
-
-	static void vac_state_derivatives_lambda(double t, double y[], double yp[], void* params)
-	{
-		// params
-		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
-
-		// state
-		Eigen::Map<Eigen::Vector3d> r(y);
-		Eigen::Map<Eigen::Vector3d> v(y + 3);
-		double& m = y[6];
-
-		// state derivatives
-		Eigen::Map<Eigen::Vector3d> dr(yp);
-		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
-		double& dm = yp[6];
-
-		// state transition matrices
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dl0(y + 7);
-
-		// state transition derivative matrices
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dl0(yp + 7);
-
-		// guidance
-		double dt = t - vac_params->tgi;
-		double thrust = vac_params->const_accel ? m * vac_params->a_limit : vac_params->thrust;
-		Eigen::Vector3d l = vac_params->li * cos(dt) + vac_params->ldi * sin(dt);
-
-		// set derivatives
-		dr = v;
-		dv = -r / pow(r.norm(), 3.0) + l.normalized() * thrust / m;
-		dm = thrust > 0 ? -thrust / vac_params->thrust * vac_params->mass_rate : 0.0;
-
-		// set state transition derivative matrices
-		Eigen::Matrix<double, 6, 6> dxd_dx;
-		dxd_dx.setZero();
-		dxd_dx.topRightCorner<3, 3>().setIdentity();
-		dxd_dx.bottomLeftCorner<3, 3>() = 3.0 * r * r.transpose() * pow(r.norm(), -5.0) - Eigen::Matrix3d::Identity() * pow(r.norm(), -3.0);
-
-		Eigen::Matrix<double, 6, 6> dxd_dl;
-		dxd_dl.setZero();
-		dxd_dl.bottomLeftCorner<3, 3>() = thrust / m * (-l * l.transpose() + Eigen::Matrix3d::Identity() * l.squaredNorm()) * pow(l.norm(), -3.0);
-
-		Eigen::Matrix<double, 6, 6> dl_dl0;
-		dl_dl0.topLeftCorner<3, 3>() = cos(dt) * Eigen::Matrix3d::Identity();
-		dl_dl0.topRightCorner<3, 3>() = sin(dt) * Eigen::Matrix3d::Identity();
-		dl_dl0.bottomLeftCorner<3, 3>() = -sin(dt) * Eigen::Matrix3d::Identity();
-		dl_dl0.bottomRightCorner<3, 3>() = cos(dt) * Eigen::Matrix3d::Identity();
-
-		dxd_dl0 = dxd_dx * dx_dl0 + dxd_dl * dl_dl0;
-	}
-
-	static void vac_state_derivatives_lambda_stm(double t, double y[], double yp[], void* params)
-	{
-		// params
-		VacParams* vac_params = reinterpret_cast<VacParams*>(params);
-
-		// state
-		Eigen::Map<Eigen::Vector3d> r(y);
-		Eigen::Map<Eigen::Vector3d> v(y + 3);
-		double& m = y[6];
-
-		// state derivatives
-		Eigen::Map<Eigen::Vector3d> dr(yp);
-		Eigen::Map<Eigen::Vector3d> dv(yp + 3);
-		double& dm = yp[6];
-
-		// state transition matrices
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dx0(y + 7);
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dl0(y + 43);
-		Eigen::Map<Eigen::Matrix<double, 6, 1>> dx_dm0(y + 79);
-
-		// state transition derivative matrices
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dx0(yp + 7);
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dxd_dl0(yp + 43);
-		Eigen::Map<Eigen::Matrix<double, 6, 1>> dxd_dm0(yp + 79);
-		
-		// guidance
-		double dt = t - vac_params->tgi;
-		double thrust = vac_params->const_accel ? m * vac_params->a_limit : vac_params->thrust;
-		Eigen::Vector3d l = vac_params->li * cos(dt) + vac_params->ldi * sin(dt);
-
-		// set derivatives
-		dr = v;
-		dv = -r / pow(r.norm(), 3.0) + l.normalized() * thrust / m;
-		dm = thrust > 0 ? -thrust / vac_params->thrust * vac_params->mass_rate : 0.0;
-
-		// set state transition derivative matrices
-		Eigen::Matrix<double, 6, 6> dxd_dx;
-		dxd_dx.setZero();
-		dxd_dx.topRightCorner<3, 3>().setIdentity();
-		dxd_dx.bottomLeftCorner<3, 3>() = 3.0 * r * r.transpose() * pow(r.norm(), -5.0) - Eigen::Matrix3d::Identity() * pow(r.norm(), -3.0);
-
-		dxd_dx0 = dxd_dx * dx_dx0;
-
-		Eigen::Matrix<double, 6, 6> dxd_dl;
-		dxd_dl.setZero();
-		dxd_dl.bottomLeftCorner<3, 3>() = thrust / m * (-l * l.transpose() + Eigen::Matrix3d::Identity() * l.squaredNorm()) * pow(l.norm(), -3.0);
-		
-		Eigen::Matrix<double, 6, 6> dl_dl0;
-		dl_dl0.topLeftCorner<3, 3>() = cos(dt) * Eigen::Matrix3d::Identity();
-		dl_dl0.topRightCorner<3, 3>() = sin(dt) * Eigen::Matrix3d::Identity();
-		dl_dl0.bottomLeftCorner<3, 3>() = -sin(dt) * Eigen::Matrix3d::Identity();
-		dl_dl0.bottomRightCorner<3, 3>() = cos(dt) * Eigen::Matrix3d::Identity();
-
-		dxd_dl0 = dxd_dx * dx_dl0 + dxd_dl * dl_dl0;
-
-		Eigen::Matrix<double, 6, 1> dxd_dm;
-		dxd_dm.setZero();
-		if (!vac_params->const_accel) dxd_dm.bottomRows<3>() = -l.normalized() * thrust / m / m;
-
-		dxd_dm0 = dxd_dx * dx_dm0 + dxd_dm;
+		dxd_dxi = dxd_dx * dx_dxi;
 	}
 
 	static void simulate_vac_phase(void f(double t, double y[], double yp[], void* params), int neqn, double& t, double tout, double tf, double* y, double* yp, VehicleEvents* vehicle_events, VacParams* vac_params, IntegratorParams* integrator_params)
@@ -713,7 +661,7 @@ namespace kerbal_guidance_system
 			vac_params.thrust = vehicle_events.get_thrust_vac();
 			vac_params.mass_rate = vehicle_events.get_mdot();
 
-			Equation eq = Equation(vac_state_derivatives_aguidance, 7, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
+			Equation eq = Equation(vac_state_derivatives_active_guidance, 7, t, y, integrator_params.method, integrator_params.reltol, integrator_params.abstol, &vac_params);
 
 			double tf = vehicle_events.get_tf();
 			size_t steps = size_t(500 * (tf - t)) + 1;
@@ -788,19 +736,6 @@ namespace kerbal_guidance_system
 		}
 	}
 
-	// partial derivative functions
-	static Eigen::MatrixXd mcross(Eigen::MatrixXd m, Eigen::Vector3d v)
-	{
-		Eigen::MatrixXd r(3, m.cols());
-		for (size_t i = 0; i < m.cols(); i++)
-		{
-			Eigen::Vector3d mv(m.col(i));
-			r.col(i) = mv.cross(v);
-		}
-			
-		return r;
-	}
-
 	template <typename Derived>
 	Derived cross(const Eigen::Vector3d& vector, const Eigen::MatrixBase<Derived>& matrix)
 	{
@@ -813,11 +748,6 @@ namespace kerbal_guidance_system
 	{
 		Eigen::Matrix3d skew{ {0.0, -vector(2), vector(1)}, {vector(2), 0.0, -vector(0)}, {-vector(1), vector(0), 0.0} };
 		return -skew * matrix;
-	}
-
-	static Eigen::Matrix3d skew(Eigen::Vector3d v)
-	{
-		return Eigen::Matrix3d{ {0.0, -v(2), v(1)}, {v(2), 0.0, -v(0)}, {-v(1), v(0), 0.0} };
 	}
 
 	// vacuum python functions
@@ -835,8 +765,8 @@ namespace kerbal_guidance_system
 		double y[43];
 		double yp[7];
 		std::copy(py_yi.mutable_data(), py_yi.mutable_data() + 7, y);
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dl0(y + 7);
-		dx_dl0.setZero();
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dLi(y + 7);
+		dx_dLi.setZero();
 
 		// initial phase
 		while (vehicle_events.get_tf() + coast_duration < t)
@@ -846,7 +776,7 @@ namespace kerbal_guidance_system
 		while (vehicle_events.is_valid())
 		{
 			double tf = vehicle_events.get_tf() + coast_duration;
-			simulate_vac_phase(vac_state_derivatives_lambda, 43, t, tgf, tf, y, yp, &vehicle_events, &vac_params, &integrator_params);
+			simulate_vac_phase(vac_state_derivatives_active_guidance_stm, 43, t, tgf, tf, y, yp, &vehicle_events, &vac_params, &integrator_params);
 			if (tf > tgf) break;
 			vehicle_events.next();
 		}
@@ -858,10 +788,10 @@ namespace kerbal_guidance_system
 		Eigen::Vector3d sigma = rf.cross(ldf) - vf.cross(lf);
 
 		Eigen::Matrix<double, 3, 7> dr_du;
-		dr_du << dx_dl0.topRows(3), Eigen::Map<Eigen::Matrix<double, 3, 1>>(yp);
+		dr_du << dx_dLi.topRows<3>(), Eigen::Map<Eigen::Matrix<double, 3, 1>>(yp);
 
 		Eigen::Matrix<double, 3, 7> dv_du;
-		dv_du << dx_dl0.bottomRows(3), Eigen::Map<Eigen::Matrix<double, 3, 1>>(yp + 3);
+		dv_du << dx_dLi.bottomRows<3>(), Eigen::Map<Eigen::Matrix<double, 3, 1>>(yp + 3);
 
 		Eigen::Matrix<double, 3, 7> dlf_du;
 		dlf_du << cos(dtg) * Eigen::Matrix3d::Identity(), sin(dtg) * Eigen::Matrix3d::Identity(), ldf;
@@ -890,8 +820,8 @@ namespace kerbal_guidance_system
 
 		if (mode == 0)
 		{
-			residuals.middleRows(3, 3) = sigma;
-			dresiduals_du.middleCols(3, 3) = dsigma_du.transpose();
+			residuals.middleRows<3>(3) = sigma;
+			dresiduals_du.middleCols<3>(3) = dsigma_du.transpose();
 		}
 		else
 		{
@@ -959,7 +889,7 @@ namespace kerbal_guidance_system
 		{
 			double tout = coast_time;
 			double tf = vehicle_events.get_tf();
-			simulate_vac_phase_output(vac_state_derivatives_vguidance, t, tout, tf, y, &vehicle_events, &vac_params, &integrator_params, &output);
+			simulate_vac_phase_output(vac_state_derivatives_passive_guidance, t, tout, tf, y, &vehicle_events, &vac_params, &integrator_params, &output);
 			if (tf > tout) break;
 			vehicle_events.next();
 		}
@@ -973,7 +903,7 @@ namespace kerbal_guidance_system
 		{
 			double tout = vac_params.tgi + dtg;
 			double tf = vehicle_events.get_tf() + coast_duration;
-			simulate_vac_phase_output(vac_state_derivatives_aguidance, t, tout, tf, y, &vehicle_events, &vac_params, &integrator_params, &output);
+			simulate_vac_phase_output(vac_state_derivatives_active_guidance, t, tout, tf, y, &vehicle_events, &vac_params, &integrator_params, &output);
 			if (tf > tout) break;
 			vehicle_events.next();
 		}
@@ -1007,7 +937,7 @@ namespace kerbal_guidance_system
 		{
 			double tout = coast_time;
 			double tf = vehicle_events.get_tf();
-			simulate_vac_phase(vac_state_derivatives_vguidance, 7, t, tout, tf, y, nullptr, &vehicle_events, &vac_params, &integrator_params);
+			simulate_vac_phase(vac_state_derivatives_passive_guidance, 7, t, tout, tf, y, nullptr, &vehicle_events, &vac_params, &integrator_params);
 			if (tf > tout) break;
 			vehicle_events.next();
 		}
@@ -1021,7 +951,7 @@ namespace kerbal_guidance_system
 		{
 			double tout = vac_params.tgi + dtg;
 			double tf = vehicle_events.get_tf() + coast_duration;
-			simulate_vac_phase(vac_state_derivatives_aguidance, 7, t, tout, tf, y, nullptr, &vehicle_events, &vac_params, &integrator_params);
+			simulate_vac_phase(vac_state_derivatives_active_guidance, 7, t, tout, tf, y, nullptr, &vehicle_events, &vac_params, &integrator_params);
 			if (tf > tout) break;
 			vehicle_events.next();
 		}
@@ -1043,7 +973,7 @@ namespace kerbal_guidance_system
 
 		if (mode == 0)
 		{
-			residuals.middleRows(3, 3) = sigma;
+			residuals.middleRows<3>(3) = sigma;
 		}
 		else
 		{
@@ -1077,22 +1007,20 @@ namespace kerbal_guidance_system
 		double coast_duration = py_x.at(8);
 		double* c = py_c.mutable_data();
 
-		double yf[7];
-		double yv[7];
+		double y[7];
 		double yc[43];
 		double yg1[86];
 		double ygn[86];
 
-		double ypv[7];
+		double yp[7];
 		double ypc[7];
 		double ypg1[7];
 		double ypgn[7];
 
-		Eigen::Matrix<double, 6, 9> dy_du;
-		Eigen::Matrix<double, 7, 9> dc_du;
+		Eigen::Matrix<double, 6, 9> dx_du;
 
-		// velocity guidance phase
-		std::copy(py_yi.mutable_data(), py_yi.mutable_data() + 7, yv);
+		// passive guidance phase
+		std::copy(py_yi.mutable_data(), py_yi.mutable_data() + 7, y);
 		while (vehicle_events.get_tf() < t)
 			vehicle_events.next();
 
@@ -1100,77 +1028,77 @@ namespace kerbal_guidance_system
 		{
 			double tout = coast_time;
 			double tf = vehicle_events.get_tf();
-			simulate_vac_phase(vac_state_derivatives_vguidance, 7, t, tout, tf, yv, ypv, &vehicle_events, &vac_params, &integrator_params);
+			simulate_vac_phase(vac_state_derivatives_passive_guidance, 7, t, tout, tf, y, yp, &vehicle_events, &vac_params, &integrator_params);
 			if (tf > tout) break;
 			vehicle_events.next();
 		}
 
 		// coast phase
-		std::copy(yv, yv + 7, yc);
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> yc_dx_dx0(yc + 7);
-		yc_dx_dx0.setIdentity();
+		std::copy(y, y + 7, yc);
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dxi_c(yc + 7);
+		dx_dxi_c.setIdentity();
 		double tout = coast_time + coast_duration;
-		simulate_vac_phase(vac_state_derivatives_stm, 43, t, tout, tout, yc, ypc, nullptr, nullptr, &integrator_params);
+		simulate_vac_phase(vac_state_derivatives_coast_stm, 43, t, tout, tout, yc, ypc, nullptr, nullptr, &integrator_params);
 
 		// guidance phase
 		// remainder of coast stage
 		std::copy(yc, yc + 7, yg1);
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> yg1_dx_dx0(yg1 + 7);
-		Eigen::Map<Eigen::Matrix<double, 6, 6>> yg1_dx_dl0(yg1 + 43);
-		Eigen::Map<Eigen::Matrix<double, 6, 1>> yg1_dx_dm0(yg1 + 79);
-		yg1_dx_dx0.setIdentity();
-		yg1_dx_dl0.setZero();
-		yg1_dx_dm0.setZero();
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dxi_g1(yg1 + 7);
+		Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dLi_g1(yg1 + 43);
+		Eigen::Map<Eigen::Matrix<double, 6, 1>> dx_dmi_g1(yg1 + 79);
+		dx_dxi_g1.setIdentity();
+		dx_dLi_g1.setZero();
+		dx_dmi_g1.setZero();
 		tout = vac_params.tgi + dtg;
 		double tf = vehicle_events.get_tf() + coast_duration;
-		simulate_vac_phase(vac_state_derivatives_lambda_stm, 86, t, tout, tf, yg1, ypg1, &vehicle_events, &vac_params, &integrator_params);
+		simulate_vac_phase(vac_state_derivatives_stm, 86, t, tout, tf, yg1, ypg1, &vehicle_events, &vac_params, &integrator_params);
 
 		if (tf > tout)
 		{
-			std::copy(yg1, yg1 + 7, yf);
-			dy_du.leftCols<6>() = yg1_dx_dl0;
-			dy_du.col(6) = Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypg1);
-			dy_du.col(7) = yg1_dx_dx0 * yc_dx_dx0 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypv) + yg1_dx_dm0 * ypv[6];
-			dy_du.col(8) = yg1_dx_dx0 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypc);
+			std::copy(yg1, yg1 + 7, y);
+			dx_du.leftCols<6>() = dx_dLi_g1;
+			dx_du.col(6) = Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypg1);
+			dx_du.col(7) = dx_dxi_g1 * dx_dxi_c * Eigen::Map<Eigen::Matrix<double, 6, 1>>(yp) + dx_dmi_g1 * yp[6];
+			dx_du.col(8) = dx_dxi_g1 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypc);
 		}
 		else
 		{
 			vehicle_events.next();
 			std::copy(yg1, yg1 + 7, ygn);
-			Eigen::Map<Eigen::Matrix<double, 6, 6>> ygn_dx_dx0(ygn + 7);
-			Eigen::Map<Eigen::Matrix<double, 6, 6>> ygn_dx_dl0(ygn + 43);
-			Eigen::Map<Eigen::Matrix<double, 6, 1>> ygn_dx_dm0(ygn + 79);
-			ygn_dx_dx0.setIdentity();
-			ygn_dx_dl0.setZero();
-			ygn_dx_dm0.setZero();
+			Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dxi_gn(ygn + 7);
+			Eigen::Map<Eigen::Matrix<double, 6, 6>> dx_dLi_gn(ygn + 43);
+			Eigen::Map<Eigen::Matrix<double, 6, 1>> dx_dmi_gn(ygn + 79);
+			dx_dxi_gn.setIdentity();
+			dx_dLi_gn.setZero();
+			dx_dmi_gn.setZero();
 
 			while (vehicle_events.is_valid())
 			{
 				double tf = vehicle_events.get_tf() + coast_duration;
-				simulate_vac_phase(vac_state_derivatives_lambda_stm, 86, t, tout, tf, ygn, ypgn, &vehicle_events, &vac_params, &integrator_params);
+				simulate_vac_phase(vac_state_derivatives_stm, 86, t, tout, tf, ygn, ypgn, &vehicle_events, &vac_params, &integrator_params);
 				if (tf > tout) break;
 				vehicle_events.next();
 			}
 
-			Eigen::Matrix<double, 6, 1> dl_dt;
-			dl_dt << vac_params.ldi, -vac_params.li;
+			Eigen::Matrix<double, 6, 1> dL_dt;
+			dL_dt << vac_params.ldi, -vac_params.li;
 
-			std::copy(ygn, ygn + 7, yf);
-			dy_du.leftCols<6>() = ygn_dx_dx0 * yg1_dx_dl0 + ygn_dx_dl0;
-			dy_du.col(6) = Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypgn);
-			dy_du.col(7) = ygn_dx_dx0 * (yg1_dx_dx0 * yc_dx_dx0 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypv) + yg1_dx_dm0 * ypv[6] - Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypg1)) + Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypgn) - ygn_dx_dl0 * dl_dt;
-			dy_du.col(8) = ygn_dx_dx0 * yg1_dx_dx0 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypc);
+			std::copy(ygn, ygn + 7, y);
+			dx_du.leftCols<6>() = dx_dxi_gn * dx_dLi_g1 + dx_dLi_gn;
+			dx_du.col(6) = Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypgn);
+			dx_du.col(7) = dx_dxi_gn * (dx_dxi_g1 * dx_dxi_c * Eigen::Map<Eigen::Matrix<double, 6, 1>>(yp) + dx_dmi_g1 * yp[6] - Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypg1)) + Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypgn) - dx_dLi_gn * dL_dt;
+			dx_du.col(8) = dx_dxi_gn * dx_dxi_g1 * Eigen::Map<Eigen::Matrix<double, 6, 1>>(ypc);
 		}
 
-		Eigen::Vector3d rf(yf);
-		Eigen::Vector3d vf(yf + 3);
+		Eigen::Vector3d rf(y);
+		Eigen::Vector3d vf(y + 3);
 		Eigen::Vector3d lf = vac_params.li * cos(dtg) + vac_params.ldi * sin(dtg);
 		Eigen::Vector3d ldf = -vac_params.li * sin(dtg) + vac_params.ldi * cos(dtg);
 		Eigen::Vector3d sigma = rf.cross(ldf) - vf.cross(lf);
 
-		Eigen::Matrix<double, 3, 9> dr_du = dy_du.topRows(3);
+		Eigen::Matrix<double, 3, 9> dr_du = dx_du.topRows(3);
 
-		Eigen::Matrix<double, 3, 9> dv_du = dy_du.bottomRows(3);
+		Eigen::Matrix<double, 3, 9> dv_du = dx_du.bottomRows(3);
 
 		Eigen::Matrix<double, 3, 9> dlf_du;
 		dlf_du << cos(dtg) * Eigen::Matrix3d::Identity(), sin(dtg)* Eigen::Matrix3d::Identity(), ldf, 0.0, 0.0;
@@ -1181,7 +1109,7 @@ namespace kerbal_guidance_system
 		Eigen::Matrix<double, 3, 9> dsigma_du = cross(dr_du, ldf) + cross(rf, dldf_du) - cross(dv_du, lf) - cross(vf, dlf_du);
 
 		py::array_t<double> py_dresiduals_du({ 7, 9 });
-		Eigen::Map<Eigen::Matrix<double, 7, 7>> dresiduals_du(py_dresiduals_du.mutable_data());
+		Eigen::Map<Eigen::Matrix<double, 9, 7>> dresiduals_du(py_dresiduals_du.mutable_data());
 		
 		dresiduals_du.col(0) = 2.0 * rf.transpose() * dr_du;
 		dresiduals_du.col(1) = 2.0 * vf.transpose() * dv_du;
@@ -1190,7 +1118,7 @@ namespace kerbal_guidance_system
 
 		if (mode == 0)
 		{
-			dresiduals_du.middleCols(3, 3) = dsigma_du.transpose();
+			dresiduals_du.middleCols<3>(3) = dsigma_du.transpose();
 		}
 		else
 		{
@@ -1198,7 +1126,7 @@ namespace kerbal_guidance_system
 			Eigen::Vector3d h = rf.cross(vf);
 			Eigen::Matrix3d dr_dr = Eigen::Matrix3d::Identity();
 			Eigen::Matrix3d dv_dv = Eigen::Matrix3d::Identity();
-			Eigen::Matrix<double, 3, 7> dh_du = cross(dr_du, vf) + cross(rf, dv_du);
+			Eigen::Matrix<double, 3, 9> dh_du = cross(dr_du, vf) + cross(rf, dv_du);
 			dresiduals_du.col(3) = k.transpose() * cross(dr_dr, vf) * dr_du + k.transpose() * cross(rf, dv_dv) * dv_du;
 			dresiduals_du.col(5) = h.transpose() * dsigma_du + sigma.transpose() * dh_du;
 			if (mode == 1)
@@ -1213,38 +1141,5 @@ namespace kerbal_guidance_system
 		}
 
 		return py_dresiduals_du;
-
-		//Eigen::Vector3d rf(yf);
-		//Eigen::Vector3d vf(yf + 3);
-		//Eigen::Vector3d lf = vac_params.li * cos(dtg) + vac_params.ldi * sin(dtg);
-		//Eigen::Vector3d dlf = -vac_params.li * sin(dtg) + vac_params.ldi * cos(dtg);
-
-		//Eigen::Matrix<double, 6, 9> dlf_du;
-		//dlf_du.setZero();
-		//dlf_du.block<3, 3>(0, 0) = cos(dtg) * Eigen::Matrix3d::Identity();
-		//dlf_du.block<3, 3>(0, 3) = sin(dtg) * Eigen::Matrix3d::Identity();
-		//dlf_du.block<3, 3>(3, 0) = -sin(dtg) * Eigen::Matrix3d::Identity();
-		//dlf_du.block<3, 3>(3, 3) = cos(dtg) * Eigen::Matrix3d::Identity();
-		//dlf_du.col(6) << dlf, -lf;
-
-		//Eigen::Vector3d dmdlf_dldf = dlf / dlf.norm();
-
-		//switch (mode)
-		//{
-		//case 0:
-		//	dc_du.row(0) = 2.0 * rf.transpose() * dy_du.topRows(3);
-		//	dc_du.row(1) = 2.0 * vf.transpose() * dy_du.bottomRows(3);
-		//	dc_du.row(2) = rf.transpose() * dy_du.bottomRows(3) + vf.transpose() * dy_du.topRows(3);
-		//	for (size_t i = 0; i < 9; i++)
-		//		dc_du.block<3, 1>(3, i) = dy_du.block<3, 1>(0, i).cross(dlf) + rf.cross(dlf_du.block<3, 1>(3, i)) - dy_du.block<3, 1>(3, i).cross(lf) - vf.cross(dlf_du.block<3, 1>(0, i));
-		//	dc_du.row(6) = dmdlf_dldf.transpose() * dlf_du.bottomRows(3);
-		//	break;
-		//}
-
-		//py::array_t<double> py_jac({ 7, 9 });
-		//Eigen::Map<Eigen::Matrix<double, 9, 7>> jac(py_jac.mutable_data());
-		//jac = dc_du.transpose();
-
-		//return py_jac;
 	}
 }
